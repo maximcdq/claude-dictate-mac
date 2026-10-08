@@ -251,7 +251,11 @@ enum Mic {
 final class VoiceBadge: NSView {
     enum Mode { case off, live, processing }
 
-    private var engine = AVAudioEngine()
+    // AVAudioEngine can block for seconds while Core Audio reshuffles devices: it lives on a queue of its own, so the
+    // main thread, and with it the Fn event tap, never waits on it
+    private let micQueue = DispatchQueue(label: "badge.mic")
+    private var engine: AVAudioEngine?  // micQueue only
+    private var micBusy = false  // main: a start is queued or running
     private var level: CGFloat = 0
     private var smoothed: CGFloat = 0
     private var timer: Timer?
@@ -263,7 +267,6 @@ final class VoiceBadge: NSView {
     private var device: AudioDeviceID?
     private var lastBufferAt = Date()
     private var restartedAt = Date()
-    private var configObserver: NSObjectProtocol?
 
     func listen(device: AudioDeviceID?) {
         guard mode == .off else { return }
@@ -284,7 +287,7 @@ final class VoiceBadge: NSView {
         // format does that), and the badge would sit black while the transcript runs: no buffers for a while, even
         // silent ones, means it went quiet, so it starts over.
         let now = Date()
-        if mode == .live, now.timeIntervalSince(lastBufferAt) > 0.4, now.timeIntervalSince(restartedAt) > 1 {
+        if mode == .live, !micBusy, now.timeIntervalSince(lastBufferAt) > 0.4, now.timeIntervalSince(restartedAt) > 1 {
             log("mic: no audio reaching the badge, restarting its engine")
             stopMic()
             startMic()
@@ -295,7 +298,27 @@ final class VoiceBadge: NSView {
     private func startMic() {
         restartedAt = Date()
         lastBufferAt = Date()
-        engine = AVAudioEngine()
+        micBusy = true
+        let device = self.device
+        micQueue.async { [weak self] in
+            self?.startEngine(device: device)
+            DispatchQueue.main.async { self?.micBusy = false }
+        }
+    }
+
+    private func stopMic() {
+        micQueue.async { [weak self] in
+            guard let engine = self?.engine else { return }
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+            self?.engine = nil
+        }
+    }
+
+    // micQueue
+    private func startEngine(device: AudioDeviceID?) {
+        let engine = AVAudioEngine()
+        self.engine = engine
         let input = engine.inputNode
         // bound to the device itself: an engine on the default input stops dead (no buffers) when the default
         // moves to the built-in mic right under it, and the badge would sit gray and still
@@ -316,13 +339,6 @@ final class VoiceBadge: NSView {
                 self?.level = v
                 self?.lastBufferAt = Date()
             }
-        }
-        configObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
-            guard let self, self.mode == .live else { return }
-            log("mic: the badge's engine was reconfigured, restarting it")
-            self.stopMic()
-            self.startMic()
         }
         do { try engine.start() } catch { log("mic: \(error)") }
     }
@@ -345,12 +361,6 @@ final class VoiceBadge: NSView {
         timer = nil
     }
 
-    private func stopMic() {
-        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
-        configObserver = nil
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-    }
 
     private static func hsl(hue: CGFloat) -> NSColor {
         let t = (hue.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
