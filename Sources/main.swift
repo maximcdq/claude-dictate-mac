@@ -89,7 +89,8 @@ final class ClaudePty {
         let envp = env.map { strdup("\($0.key)=\($0.value)") } + [nil]
         let bin = claudeBinary()
         // voice is off in the user's settings (Space types spaces in their sessions); this session turns it on
-        let argv = [bin, "--plugin-dir", modDir, "--settings", #"{"voiceEnabled":true,"voice":{"enabled":true,"mode":"hold"}}"#].map { strdup($0) } + [nil]
+        let args: [String] = [bin, "--plugin-dir", modDir, "--settings", #"{"voiceEnabled":true,"voice":{"enabled":true,"mode":"hold"}}"#]
+        let argv = args.map { strdup($0) } + [nil]
         defer { (envp + argv).forEach { free($0) } }
 
         try? FileManager.default.createDirectory(atPath: agentDir, withIntermediateDirectories: true)
