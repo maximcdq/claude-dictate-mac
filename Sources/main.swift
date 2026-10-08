@@ -672,12 +672,29 @@ func enableAppAccessibility() {
     guard let app = NSWorkspace.shared.frontmostApplication else { return }
     let element = AXUIElementCreateApplication(app.processIdentifier)
     AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-    // Chromium 15x ignores that one and switches its web content off again when unused; the flag VoiceOver sets on
-    // every app turns it on. Only for an app that can't tell its focused element, the flag costs apps some speed.
+    // Chromium 15x ignores that one and switches its web content off again when unused; the flag VoiceOver sets turns
+    // it on. Only for Chromium: to any other app it says a screen reader is running, and some change their behavior
+    // for it (window animations, iTerm's hotkey window).
     var focused: CFTypeRef?
-    if AXUIElementCopyAttributeValue(element, kAXFocusedUIElementAttribute as CFString, &focused) != .success {
+    if isChromium(app), AXUIElementCopyAttributeValue(element, kAXFocusedUIElementAttribute as CFString, &focused) != .success {
         AXUIElementSetAttributeValue(element, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
     }
+}
+
+// Chrome, Edge, Brave, Arc, Electron apps…: every Chromium-based app ships a "<name> Helper (Renderer).app"
+private var chromiumApps: [URL: Bool] = [:]
+func isChromium(_ app: NSRunningApplication) -> Bool {
+    guard let url = app.bundleURL else { return false }
+    if let known = chromiumApps[url] { return known }
+    var found = false
+    if let walk = FileManager.default.enumerator(at: url.appendingPathComponent("Contents/Frameworks"), includingPropertiesForKeys: nil) {
+        for case let item as URL in walk {
+            if item.lastPathComponent.hasSuffix("Helper (Renderer).app") { found = true; break }
+            if item.pathExtension == "app" || walk.level > 5 { walk.skipDescendants() }
+        }
+    }
+    chromiumApps[url] = found
+    return found
 }
 
 // MARK: - Typing into the focused field
