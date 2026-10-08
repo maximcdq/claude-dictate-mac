@@ -268,6 +268,9 @@ final class VoiceBadge: NSView {
     private var device: AudioDeviceID?
     private var lastBufferAt = Date()
     private var restartedAt = Date()
+    private var heardAt: Date?  // the first audio of this dictation; until then the badge spins
+    static let introMin: TimeInterval = 0.45  // the spin shows at least this long, so the eye finds the badge
+    static let introFade: TimeInterval = 0.3
 
     func listen(device: AudioDeviceID?) {
         guard mode == .off else { return }
@@ -277,6 +280,7 @@ final class VoiceBadge: NSView {
         startedAt = Date()
         shownAt = Date()
         leavingAt = nil
+        heardAt = nil
         self.device = device
         startMic()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.step() }
@@ -288,7 +292,7 @@ final class VoiceBadge: NSView {
         // format does that), and the badge would sit black while the transcript runs: no buffers for a while, even
         // silent ones, means it went quiet, so it starts over.
         let now = Date()
-        if mode == .live, !micBusy, now.timeIntervalSince(lastBufferAt) > 0.4, now.timeIntervalSince(restartedAt) > 1 {
+        if mode == .live, !micBusy, now.timeIntervalSince(lastBufferAt) > 0.4, now.timeIntervalSince(restartedAt) > 0.6 {
             log("mic: no audio reaching the badge, restarting its engine")
             stopMic()
             startMic()
@@ -337,8 +341,10 @@ final class VoiceBadge: NSView {
             let rms16 = sqrt(sum / Float(max(n, 1))) * 32768  // Claude measures 16-bit samples
             let v = CGFloat(sqrt(min(rms16 / 2000, 1)))
             DispatchQueue.main.async {
-                self?.level = v
-                self?.lastBufferAt = Date()
+                guard let self else { return }
+                self.level = v
+                self.lastBufferAt = Date()
+                if self.heardAt == nil { self.heardAt = self.lastBufferAt }
             }
         }
         do { try engine.start() } catch { log("mic: \(error)") }
@@ -396,27 +402,8 @@ final class VoiceBadge: NSView {
             pop *= 1 - 0.15 * out * out
         }
 
-        switch mode {
-        case .off: return
-        case .live:
-            let target = min(level * 1.8, 1)
-            smoothed += (target - smoothed) * (target > smoothed ? 0.45 : 0.18)
-            let speech = min(max((level - 0.1) / 0.1, 0), 1)  // crossfade around Claude's 0.15 threshold
-            // the mic and the ring share one color: black in silence, Claude's hue with the voice
-            let color = NSColor.black.blended(withFraction: speech, of: hue)!
-            // a soft round glow right around the mic: none in silence, stronger and larger with the voice
-            color.withAlphaComponent(0.26 * speech).setFill()
-            let glow = outline.height / 2 * (0.5 + 0.42 * smoothed) * pop
-            NSBezierPath(ovalIn: NSRect(x: center.x - glow, y: center.y - glow, width: glow * 2, height: glow * 2)).fill()
-            // a hairline outline in silence that thickens with the level
-            let ring = capsule()
-            ring.lineWidth = 0.5 + 2.2 * smoothed
-            color.withAlphaComponent(0.9).setStroke()
-            ring.stroke()
-            mic(color, size: 14 * (1 + 0.14 * smoothed) * pop, center: center)
-        case .processing:
-            // a pulse on the mic, and an arc running round the ring
-            let elapsed = CGFloat(now.timeIntervalSince(processingAt))
+        // a pulse on the mic and an arc running round the ring: while the mic starts and while the text finishes
+        let spinner = { (elapsed: CGFloat) in
             let k = (sin(elapsed * .pi * 2 / 2) + 1) / 2
             let gray = 0.3 * k  // pulses up from black, where the live mic rests
             let ring = capsule()
@@ -432,7 +419,49 @@ final class VoiceBadge: NSView {
             run.lineCapStyle = .round
             hue.setStroke()
             run.stroke()
-            mic(NSColor(srgbRed: gray, green: gray, blue: gray, alpha: 1), size: 14 * pop, center: center)
+            self.mic(NSColor(srgbRed: gray, green: gray, blue: gray, alpha: 1), size: 14 * pop, center: center)
+        }
+        let ctx = NSGraphicsContext.current?.cgContext
+        let faded = { (alpha: CGFloat, body: () -> Void) in
+            guard alpha > 0 else { return }
+            guard alpha < 1, let ctx else { return body() }
+            ctx.saveGState()
+            ctx.setAlpha(alpha)
+            ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+            body()
+            ctx.endTransparencyLayer()
+            ctx.restoreGState()
+        }
+
+        switch mode {
+        case .off: return
+        case .live:
+            let target = min(level * 1.8, 1)
+            smoothed += (target - smoothed) * (target > smoothed ? 0.45 : 0.18)
+            // the spin until the mic is heard (and at least introMin), then a crossfade into the live mic
+            var intro: CGFloat = 1
+            if let heardAt {
+                let from = max(heardAt, shownAt.addingTimeInterval(Self.introMin))
+                intro = 1 - min(max(CGFloat(now.timeIntervalSince(from) / Self.introFade), 0), 1)
+            }
+            faded(intro) { spinner(CGFloat(now.timeIntervalSince(shownAt))) }
+            faded(1 - intro) {
+                let speech = min(max((level - 0.1) / 0.1, 0), 1)  // crossfade around Claude's 0.15 threshold
+                // the mic and the ring share one color: black in silence, Claude's hue with the voice
+                let color = NSColor.black.blended(withFraction: speech, of: hue)!
+                // a soft round glow right around the mic: none in silence, stronger and larger with the voice
+                color.withAlphaComponent(0.26 * speech).setFill()
+                let glow = outline.height / 2 * (0.5 + 0.42 * smoothed) * pop
+                NSBezierPath(ovalIn: NSRect(x: center.x - glow, y: center.y - glow, width: glow * 2, height: glow * 2)).fill()
+                // a hairline outline in silence that thickens with the level
+                let ring = capsule()
+                ring.lineWidth = 0.5 + 2.2 * smoothed
+                color.withAlphaComponent(0.9).setStroke()
+                ring.stroke()
+                mic(color, size: 14 * (1 + 0.14 * smoothed) * pop, center: center)
+            }
+        case .processing:
+            spinner(CGFloat(now.timeIntervalSince(processingAt)))
         }
     }
 }
