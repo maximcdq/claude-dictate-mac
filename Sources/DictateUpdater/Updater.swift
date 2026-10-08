@@ -147,12 +147,14 @@ public final class Updater {
         guard info?["CFBundleIdentifier"] as? String == appLabel else { throw UpdateError("not ClaudeDictate") }
         guard (info?["CFBundleShortVersionString"] as? String).flatMap(Version.init) == version else { throw UpdateError("version mismatch") }
 
-        // the local identity keeps the permissions; without it (an install not made by install.sh) an ad-hoc
-        // signature still runs, and macOS asks for the permissions again
-        do {
-            try run("/usr/bin/codesign", ["--force", "--sign", config.signingIdentity, "--identifier", appLabel, app.path])
-        } catch {
-            log("update: no local signing identity (\(error)), signing ad hoc: permissions will be asked again")
+        // the local identity keeps the permissions. codesign now and then fails on it with an I/O error, so it gets a
+        // few tries, and a failure leaves the update for the next check rather than lose the permissions. Only
+        // without the identity (an install not made by install.sh) is it signed ad hoc: macOS asks again then.
+        let identities = (try? run("/usr/bin/security", ["find-identity", "-p", "codesigning"])) ?? ""
+        if identities.contains("\"\(config.signingIdentity)\"") {
+            try retrying(3) { try run("/usr/bin/codesign", ["--force", "--sign", config.signingIdentity, "--identifier", appLabel, app.path]) }
+        } else {
+            log("update: no local signing identity, signing ad hoc: permissions will be asked again")
             try run("/usr/bin/codesign", ["--force", "--sign", "-", "--identifier", appLabel, app.path])
         }
         try run("/usr/bin/codesign", ["--verify", "--strict", app.path])
@@ -173,6 +175,15 @@ public final class Updater {
             throw error
         }
         try? fm.removeItem(at: old)
+    }
+
+    private static func retrying(_ times: Int, _ body: () throws -> Void) throws {
+        for attempt in 1...times {
+            do { return try body() } catch where attempt < times {
+                log("update: \(error), trying again")
+                Thread.sleep(forTimeInterval: 1)
+            }
+        }
     }
 
     @discardableResult
