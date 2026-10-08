@@ -606,6 +606,9 @@ final class Indicator {
     static let fadeIn: TimeInterval = 0.22  // quick in, slower out
     static let fadeOut: TimeInterval = 0.4
     static let size = NSSize(width: 64, height: 36)  // a horizontal capsule
+    // room around the glass inside the window: Liquid Glass draws its rim a little past its frame, and a window cut
+    // to the capsule clipped that rim into a thin dark edge on light backgrounds
+    static let pad: CGFloat = 8
     let badge = VoiceBadge(frame: NSRect(origin: .zero, size: size))
     private let panel: NSPanel
     private var mouseMonitor: Any?
@@ -613,7 +616,8 @@ final class Indicator {
 
     init() {
         let frame = NSRect(origin: .zero, size: Self.size)
-        panel = NSPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        let window = frame.insetBy(dx: -Self.pad, dy: -Self.pad).offsetBy(dx: Self.pad, dy: Self.pad)
+        panel = NSPanel(contentRect: window, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.level = .statusBar
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -621,10 +625,12 @@ final class Indicator {
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.animationBehavior = .none
-        let glass = NSGlassEffectView(frame: frame)
+        let glass = NSGlassEffectView(frame: frame.offsetBy(dx: Self.pad, dy: Self.pad))
         glass.cornerRadius = Self.size.height / 2
         glass.contentView = badge
-        panel.contentView = glass
+        let content = NSView(frame: window)
+        content.addSubview(glass)
+        panel.contentView = content
     }
 
     func show() {
@@ -652,12 +658,14 @@ final class Indicator {
     // above-right of the pointer's tip, kept on the pointer's screen
     func follow() {
         let m = NSEvent.mouseLocation
-        var origin = NSPoint(x: m.x + 12, y: m.y + 6)
+        var origin = NSPoint(x: m.x + 12, y: m.y + 6)  // the glass's corner, the window sits `pad` outside it
         if let screen = NSScreen.screens.first(where: { $0.frame.contains(m) }) {
             let f = screen.visibleFrame
             origin.x = min(max(origin.x, f.minX), f.maxX - Self.size.width)
             origin.y = min(max(origin.y, f.minY), f.maxY - Self.size.height)
         }
+        origin.x -= Self.pad
+        origin.y -= Self.pad
         if origin != panel.frame.origin { panel.setFrameOrigin(origin) }
     }
 
