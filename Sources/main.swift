@@ -251,7 +251,7 @@ enum Mic {
 // which sit badly on the glass).
 
 final class VoiceBadge: NSView {
-    enum Mode { case off, live, processing, copied }
+    enum Mode { case off, live, processing, copied, empty }
 
     // An AudioQueue at 16 kHz mono 16-bit: AVAudioEngine got stuck for good inside Core Audio (enumerating
     // sub-devices) on macOS 27. Opening one can still block, so it opens off the main thread, and the Fn event tap
@@ -266,6 +266,9 @@ final class VoiceBadge: NSView {
     private var startedAt = Date()  // hue clock, runs on through processing so the color doesn't jump
     private var processingAt = Date()
     private var copiedAt = Date()
+    private var emptyAt = Date()
+    // nothing came of the dictation: a soft coral, not an alarm red
+    private static let nothing = NSColor(srgbRed: 1.0, green: 0.5, blue: 0.47, alpha: 1)
     private var shownAt = Date()
     private var leavingAt: Date?  // set while the badge fades out: the content eases down with it
     private(set) var mode = Mode.off
@@ -400,6 +403,15 @@ final class VoiceBadge: NSView {
         stopMic()
     }
 
+    // no text came: the spinner runs on and turns soft coral before the badge folds away
+    func empty() {
+        guard mode == .live || mode == .processing else { return }
+        if mode == .live { processingAt = Date() }
+        mode = .empty
+        emptyAt = Date()
+        stopMic()
+    }
+
     func leave() {
         leavingAt = Date()
     }
@@ -454,12 +466,12 @@ final class VoiceBadge: NSView {
         }
 
         // a pulse on the mic and an arc running round the ring: while the mic starts and while the text finishes
-        let spinner = { (elapsed: CGFloat) in
+        let spinner = { (elapsed: CGFloat, color: NSColor, tint: CGFloat) in
             let k = (sin(elapsed * .pi * 2 / 2) + 1) / 2
             let gray = 0.3 * k  // pulses up from black, where the live mic rests
             let ring = capsule()
             ring.lineWidth = 0.5
-            hue.withAlphaComponent(0.3).setStroke()
+            color.withAlphaComponent(0.3).setStroke()
             ring.stroke()
             // a colored segment running round the capsule, one lap a second
             let perimeter = 2 * (outline.width - outline.height) + .pi * outline.height
@@ -468,9 +480,10 @@ final class VoiceBadge: NSView {
             run.setLineDash(dash, count: 2, phase: -elapsed * perimeter)
             run.lineWidth = 2
             run.lineCapStyle = .round
-            hue.setStroke()
+            color.setStroke()
             run.stroke()
-            self.mic(NSColor(srgbRed: gray, green: gray, blue: gray, alpha: 1), size: 14 * pop, center: center)
+            let micColor = NSColor(srgbRed: gray, green: gray, blue: gray, alpha: 1).blended(withFraction: tint, of: color)!
+            self.mic(micColor, size: 14 * pop, center: center)
         }
         let ctx = NSGraphicsContext.current?.cgContext
         let faded = { (alpha: CGFloat, body: () -> Void) in
@@ -496,7 +509,7 @@ final class VoiceBadge: NSView {
                 let from = max(heardAt, shownAt.addingTimeInterval(Self.introMin))
                 intro = 1 - min(max(CGFloat(now.timeIntervalSince(from) / Self.introFade), 0), 1)
             }
-            faded(intro) { spinner(CGFloat(now.timeIntervalSince(shownAt))) }
+            faded(intro) { spinner(CGFloat(now.timeIntervalSince(shownAt)), hue, 0) }
             faded(1 - intro) {
                 let speech = min(max((level - 0.1) / 0.1, 0), 1)  // crossfade around Claude's 0.15 threshold
                 // the mic and the glow share one color: black in silence, the palette's with the voice
@@ -513,12 +526,17 @@ final class VoiceBadge: NSView {
                 mic(color, size: 14 * (1 + 0.14 * smoothed) * pop, center: center)
             }
         case .processing:
-            spinner(CGFloat(now.timeIntervalSince(processingAt)))
+            spinner(CGFloat(now.timeIntervalSince(processingAt)), hue, 0)
+        case .empty:
+            // the palette's color eases into coral over a quarter second, the mic takes a soft tint of it
+            let k = min(CGFloat(now.timeIntervalSince(emptyAt)) / 0.25, 1)
+            let eased = k * k * (3 - 2 * k)
+            spinner(CGFloat(now.timeIntervalSince(processingAt)), hue.blended(withFraction: eased, of: Self.nothing)!, 0.6 * eased)
         case .copied:
             // the spinner dissolves in 0.2 s while the copy icon springs in (0.3 s, a touch of overshoot)
             let since = CGFloat(now.timeIntervalSince(copiedAt))
             let k = min(since / 0.2, 1)
-            faded(1 - k) { spinner(CGFloat(now.timeIntervalSince(processingAt))) }
+            faded(1 - k) { spinner(CGFloat(now.timeIntervalSince(processingAt)), hue, 0) }
             faded(k) {
                 let ring = capsule()
                 ring.lineWidth = 1.5
@@ -964,6 +982,10 @@ final class Dictation {
         phase = .idle
         Mic.restore()
         log("done: \(text.count) chars\(cancelled ? ", cancelled" : "")\(detached ? (target == nil ? ", to the clipboard" : ", focus moved, to the clipboard") : "")")
+        if text.isEmpty, !cancelled {
+            indicator.badge.empty()
+            return indicator.hide(after: 0.7)
+        }
         // the clipboard only when the text did not land in a field: typed text leaves it alone
         guard !text.isEmpty, !cancelled, detached else { return indicator.hide() }
         let pb = NSPasteboard.general
