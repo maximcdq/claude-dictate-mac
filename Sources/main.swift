@@ -244,10 +244,11 @@ enum Mic {
 
 // MARK: - Recording badge: a Liquid Glass bubble at the mouse pointer
 // Carets are reported differently by every app (or not at all: Chrome's address bar), the pointer is always known.
-// So the badge rides above-right of the pointer: a glass capsule with a mic that takes Claude Code's /voice colors.
-// Claude Code 2.1.292's level and colors: level = sqrt(min(rms16 / 2000, 1)), x1.8 capped at 1; gray under 0.15,
-// else hsl(hue 90°/s, s 0.7, l 0.6). Here at 60 fps, smoothed to swell fast and settle softer; black in silence
-// instead of gray.
+// So the badge rides above-right of the pointer: a glass capsule with a mic that lights up with the voice.
+// The level is Claude Code 2.1.292's: sqrt(min(rms16 / 2000, 1)), x1.8 capped at 1, speech from 0.15. Here at 60 fps,
+// smoothed to swell fast and settle softer; the mic is black in silence, and with the voice takes a color cycling
+// through sky blue, blue, light blue and light pink (Claude's full hue wheel runs through dark violet and magenta,
+// which sit badly on the glass).
 
 final class VoiceBadge: NSView {
     enum Mode { case off, live, processing }
@@ -369,12 +370,20 @@ final class VoiceBadge: NSView {
     }
 
 
-    private static func hsl(hue: CGFloat) -> NSColor {
-        let t = (hue.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
-        let c: CGFloat = (1 - abs(2 * 0.6 - 1)) * 0.7, x = c * (1 - abs((t / 60).truncatingRemainder(dividingBy: 2) - 1)), m = 0.6 - c / 2
-        let (r, g, b): (CGFloat, CGFloat, CGFloat) =
-            t < 60 ? (c, x, 0) : t < 120 ? (x, c, 0) : t < 180 ? (0, c, x) : t < 240 ? (0, x, c) : t < 300 ? (x, 0, c) : (c, 0, x)
-        return NSColor(srgbRed: r + m, green: g + m, blue: b + m, alpha: 1)
+    private static let palette: [(CGFloat, CGFloat, CGFloat)] = [
+        (0.35, 0.78, 0.98),  // sky blue
+        (0.29, 0.56, 1.00),  // blue
+        (0.56, 0.77, 1.00),  // light blue
+        (1.00, 0.62, 0.80),  // light pink
+    ]
+
+    // one stop a second, eased between stops, looping
+    private static func color(at seconds: CGFloat) -> NSColor {
+        let n = CGFloat(palette.count)
+        let t = (seconds.truncatingRemainder(dividingBy: n) + n).truncatingRemainder(dividingBy: n)
+        let i = Int(t), f = (1 - cos((t - CGFloat(i)) * .pi)) / 2
+        let a = palette[i], b = palette[(i + 1) % palette.count]
+        return NSColor(srgbRed: a.0 + (b.0 - a.0) * f, green: a.1 + (b.1 - a.1) * f, blue: a.2 + (b.2 - a.2) * f, alpha: 1)
     }
 
     private func mic(_ color: NSColor, size: CGFloat, center: CGPoint) {
@@ -389,7 +398,7 @@ final class VoiceBadge: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard mode != .off else { return }
         let now = Date()
-        let hue = Self.hsl(hue: CGFloat(now.timeIntervalSince(startedAt)) * 90)
+        let hue = Self.color(at: CGFloat(now.timeIntervalSince(startedAt)))
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
         // a horizontal capsule, like the glass it sits in, inset from its edge
         let outline = bounds.insetBy(dx: 3.5, dy: 3.5)
@@ -408,7 +417,7 @@ final class VoiceBadge: NSView {
             let gray = 0.3 * k  // pulses up from black, where the live mic rests
             let ring = capsule()
             ring.lineWidth = 0.5
-            NSColor(white: 0, alpha: 0.5).setStroke()
+            hue.withAlphaComponent(0.3).setStroke()
             ring.stroke()
             // a colored segment running round the capsule, one lap a second
             let perimeter = 2 * (outline.width - outline.height) + .pi * outline.height
@@ -447,16 +456,16 @@ final class VoiceBadge: NSView {
             faded(intro) { spinner(CGFloat(now.timeIntervalSince(shownAt))) }
             faded(1 - intro) {
                 let speech = min(max((level - 0.1) / 0.1, 0), 1)  // crossfade around Claude's 0.15 threshold
-                // the mic and the ring share one color: black in silence, Claude's hue with the voice
+                // the mic and the glow share one color: black in silence, the palette's with the voice
                 let color = NSColor.black.blended(withFraction: speech, of: hue)!
                 // a soft round glow right around the mic: none in silence, stronger and larger with the voice
                 color.withAlphaComponent(0.26 * speech).setFill()
                 let glow = outline.height / 2 * (0.5 + 0.42 * smoothed) * pop
                 NSBezierPath(ovalIn: NSRect(x: center.x - glow, y: center.y - glow, width: glow * 2, height: glow * 2)).fill()
-                // a hairline outline in silence that thickens with the level
+                // a faint hairline of the palette's color in silence that thickens and brightens with the level
                 let ring = capsule()
                 ring.lineWidth = 0.5 + 2.2 * smoothed
-                color.withAlphaComponent(0.9).setStroke()
+                hue.withAlphaComponent(0.3 + 0.6 * speech).setStroke()
                 ring.stroke()
                 mic(color, size: 14 * (1 + 0.14 * smoothed) * pop, center: center)
             }
@@ -481,7 +490,7 @@ final class Indicator {
         panel.level = .statusBar
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        panel.hasShadow = false  // a window shadow rims the glass in black
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.animationBehavior = .none
@@ -578,9 +587,22 @@ enum Keyboard {
 // The field that has keyboard focus, to notice the user clicking elsewhere mid-dictation.
 func focusedElement() -> AXUIElement? {
     var focused: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+    if AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+       let el = focused { return (el as! AXUIElement) }
+    // Chrome at times answers only through its own app element
+    guard let app = NSWorkspace.shared.frontmostApplication,
+          AXUIElementCopyAttributeValue(AXUIElementCreateApplication(app.processIdentifier),
+                                        kAXFocusedUIElementAttribute as CFString, &focused) == .success,
           let el = focused else { return nil }
     return (el as! AXUIElement)
+}
+
+func role(of element: AXUIElement?) -> String {
+    guard let element else { return "nothing focused" }
+    var role: CFTypeRef?, subrole: CFTypeRef?
+    AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+    AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &subrole)
+    return [role, subrole].compactMap { $0 as? String }.joined(separator: "/")
 }
 
 // Whether the focused element takes typed text: it has a text caret (a selected text range). The desktop, a file
@@ -588,7 +610,11 @@ func focusedElement() -> AXUIElement? {
 func focusedTakesText(_ element: AXUIElement?) -> Bool {
     guard let element else { return false }
     var range: CFTypeRef?
-    return AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &range) == .success && range != nil
+    if AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &range) == .success, range != nil {
+        return true
+    }
+    // a text role without a caret reported: Chrome's fields while its tree is still being built
+    return ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"].contains { role(of: element).hasPrefix($0) }
 }
 
 final class Dictation {
@@ -643,11 +669,20 @@ final class Dictation {
         phase = .idle
     }
 
-    private func begin() {
+    private func begin(attempt: Int = 0) {
         guard phase == .arming else { return }
         enableAppAccessibility()  // Chrome and Electron only report their fields once asked
         let field = focusedElement()
-        guard focusedTakesText(field) else { phase = .idle; log("fn ignored: no text field in focus"); return }
+        guard focusedTakesText(field) else {
+            // they build that tree only then: ask again for half a second before giving up
+            if attempt < 5 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.begin(attempt: attempt + 1) }
+                return
+            }
+            phase = .idle
+            log("fn ignored: no text field in focus (\(role(of: field)) in \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?"))")
+            return
+        }
         phase = .holding
         cancelled = false
         detached = false
@@ -871,6 +906,10 @@ NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotif
     Mic.restore()
     dictation.pty.stop()
 }
+
+// ask every app for its accessibility tree as it comes to the front, so it is built by the time Fn is held
+NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil,
+                                                  queue: .main) { _ in enableAppAccessibility() }
 
 Mic.restore()
 installTap()
