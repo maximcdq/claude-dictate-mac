@@ -7,7 +7,8 @@ text is typed right where the caret is, live, as you talk. Release Fn and it set
 - Live: words appear while you speak and get corrected in place to the final transcript.
 - No time limit while Fn is held: Claude Code stops a recording after 2 minutes or 15 s of silence; ClaudeDictate
   picks up right after and keeps appending to the same text.
-- A small Liquid Glass badge next to the pointer reacts to your voice in Claude Code's own colors.
+- Two indicators, picked in the menu bar menu: a Liquid Glass badge next to the pointer that reacts to your voice
+  and ends with a check, a copy icon or a soft coral spin; or Claude Code's own `/voice` bar right of the text caret.
 - No text field? Speak anyway: the text lands in the clipboard.
 - **Esc** cancels and erases what this dictation typed.
 - Costs nothing extra: per [Claude Code docs](https://code.claude.com/docs/en/voice-dictation), transcription "does not

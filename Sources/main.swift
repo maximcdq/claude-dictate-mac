@@ -242,80 +242,55 @@ enum Mic {
     }
 }
 
-// MARK: - Recording badge: a Liquid Glass bubble at the mouse pointer
-// Carets are reported differently by every app (or not at all: Chrome's address bar), the pointer is always known.
-// So the badge rides above-right of the pointer: a glass capsule with a mic that lights up with the voice.
-// The level is Claude Code 2.1.292's: sqrt(min(rms16 / 2000, 1)), x1.8 capped at 1, speech from 0.15. Here at 60 fps,
-// smoothed to swell fast and settle softer; the mic is black in silence, and with the voice takes a color cycling
-// through sky blue, blue, light blue and light pink (Claude's full hue wheel runs through dark violet and magenta,
-// which sit badly on the glass).
+// MARK: - Mic level for the indicators
+// An AudioQueue at 16 kHz mono 16-bit, the level as Claude Code 2.1.292 computes it: sqrt(min(rms16 / 2000, 1)).
+// AVAudioEngine got stuck for good inside Core Audio (enumerating sub-devices) on macOS 27. Opening a queue can still
+// block, so it opens off the main thread, and the Fn event tap never waits on it; an open that hangs is left behind
+// and a fresh one tried.
 
-final class VoiceBadge: NSView {
-    enum Mode { case off, live, processing, typed, copied, empty }
-
-    // An AudioQueue at 16 kHz mono 16-bit: AVAudioEngine got stuck for good inside Core Audio (enumerating
-    // sub-devices) on macOS 27. Opening one can still block, so it opens off the main thread, and the Fn event tap
-    // never waits on it; an open that hangs is left behind and a fresh one tried.
-    private static let levelQueue = DispatchQueue(label: "badge.level")
+final class LevelMeter {
+    private static let levelQueue = DispatchQueue(label: "meter.level")
     private var recorder: AudioQueueRef?
-    private var micAttempt = 0  // a recorder that opens after a newer attempt (or a stop) is closed at once
+    private var attempt = 0  // a recorder that opens after a newer attempt (or a stop) is closed at once
     private var restarts = 0
-    private var level: CGFloat = 0
-    private var smoothed: CGFloat = 0
-    private var timer: Timer?
-    private var startedAt = Date()  // hue clock, runs on through processing so the color doesn't jump
-    private var processingAt = Date()
-    private var doneAt = Date()
-    private var emptyAt = Date()
-    // nothing came of the dictation: a soft coral, not an alarm red
-    private static let nothing = NSColor(srgbRed: 1.0, green: 0.5, blue: 0.47, alpha: 1)
-    private var shownAt = Date()
-    private var leavingAt: Date?  // set while the badge fades out: the content eases down with it
-    private(set) var mode = Mode.off
     private var device: AudioDeviceID?
     private var lastBufferAt = Date()
     private var restartedAt = Date()
-    private var heardAt: Date?  // the first audio of this dictation; until then the badge spins
-    static let introMin: TimeInterval = 0.45  // the spin shows at least this long, so the eye finds the badge
-    static let introMax: TimeInterval = 1.5  // and at most this long, even if no audio comes
-    static let introFade: TimeInterval = 0.3
+    private(set) var level: CGFloat = 0
+    private(set) var heardAt: Date?  // the first audio since start
 
-    func listen(device: AudioDeviceID?) {
-        guard mode == .off else { return }
-        mode = .live
-        smoothed = 0
+    func start(device: AudioDeviceID?) {
         level = 0
-        startedAt = Date()
-        shownAt = Date()
-        leavingAt = nil
         heardAt = nil
         restarts = 0
         self.device = device
-        startMic()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.step() }
-        RunLoop.main.add(timer!, forMode: .common)
+        open()
     }
 
-    private func step() {
-        // The engine stops without a word when its device changes under it (Claude opening the same mic in another
-        // format does that), and the badge would sit black while the transcript runs: no buffers for a while, even
-        // silent ones, means it went quiet, so it starts over.
+    func stop() {
+        attempt += 1
+        guard let recorder else { return }
+        self.recorder = nil
+        Self.close(recorder)
+    }
+
+    // every frame while recording: a recorder can go quiet without a word when its device changes under it (Claude
+    // opening the same mic in another format), so no buffers for a while, even silent ones, means start over
+    func watch() {
         let now = Date()
         let backoff = 0.6 * pow(2, Double(min(restarts, 3)))  // a wedged Core Audio is not hammered
-        if mode == .live, now.timeIntervalSince(lastBufferAt) > 0.4, now.timeIntervalSince(restartedAt) > backoff {
-            restarts += 1
-            log("mic: no audio reaching the badge, restarting its recorder")
-            stopMic()
-            startMic()
-        }
-        needsDisplay = true
+        guard now.timeIntervalSince(lastBufferAt) > 0.4, now.timeIntervalSince(restartedAt) > backoff else { return }
+        restarts += 1
+        log("mic: no audio reaching the indicator, restarting its recorder")
+        stop()
+        open()
     }
 
-    private func startMic() {
+    private func open() {
         restartedAt = Date()
         lastBufferAt = Date()
-        micAttempt += 1
-        let attempt = micAttempt, device = self.device
+        attempt += 1
+        let attempt = attempt, device = self.device
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let recorder = Self.openRecorder(device: device) { v in
                 DispatchQueue.main.async {
@@ -327,17 +302,10 @@ final class VoiceBadge: NSView {
             }
             DispatchQueue.main.async {
                 guard let recorder else { return }
-                guard let self, attempt == self.micAttempt else { return Self.close(recorder) }
+                guard let self, attempt == self.attempt else { return Self.close(recorder) }
                 self.recorder = recorder
             }
         }
-    }
-
-    private func stopMic() {
-        micAttempt += 1
-        guard let recorder else { return }
-        self.recorder = nil
-        Self.close(recorder)
     }
 
     private static func close(_ recorder: AudioQueueRef) {
@@ -387,6 +355,58 @@ final class VoiceBadge: NSView {
         return queue
     }
 
+}
+
+// MARK: - Recording badge: a Liquid Glass bubble at the mouse pointer
+// Carets are reported differently by every app (or not at all: Chrome's address bar), the pointer is always known.
+// So the badge rides above-right of the pointer: a glass capsule with a mic that lights up with the voice.
+// The level is Claude Code 2.1.292's: sqrt(min(rms16 / 2000, 1)), x1.8 capped at 1, speech from 0.15. Here at 60 fps,
+// smoothed to swell fast and settle softer; the mic is black in silence, and with the voice takes a color cycling
+// through sky blue, blue, light blue and light pink (Claude's full hue wheel runs through dark violet and magenta,
+// which sit badly on the glass).
+
+final class VoiceBadge: NSView {
+    enum Mode { case off, live, processing, typed, copied, empty }
+
+    private let meter = LevelMeter()
+    private var level: CGFloat { meter.level }
+    private var heardAt: Date? { meter.heardAt }  // until the first audio the badge spins
+    private var smoothed: CGFloat = 0
+    private var timer: Timer?
+    private var startedAt = Date()  // hue clock, runs on through processing so the color doesn't jump
+    private var processingAt = Date()
+    private var doneAt = Date()
+    private var emptyAt = Date()
+    // nothing came of the dictation: a soft coral, not an alarm red
+    private static let nothing = NSColor(srgbRed: 1.0, green: 0.5, blue: 0.47, alpha: 1)
+    private var shownAt = Date()
+    private var leavingAt: Date?  // set while the badge fades out: the content eases down with it
+    private(set) var mode = Mode.off
+    static let introMin: TimeInterval = 0.45  // the spin shows at least this long, so the eye finds the badge
+    static let introMax: TimeInterval = 1.5  // and at most this long, even if no audio comes
+    static let introFade: TimeInterval = 0.3
+
+    func listen(device: AudioDeviceID?) {
+        guard mode == .off else { return }
+        mode = .live
+        smoothed = 0
+        startedAt = Date()
+        shownAt = Date()
+        leavingAt = nil
+        meter.start(device: device)
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.step() }
+        RunLoop.main.add(timer!, forMode: .common)
+    }
+
+    private func step() {
+        if mode == .live { meter.watch() }
+        needsDisplay = true
+    }
+
+    private func stopMic() {
+        meter.stop()
+    }
+
     func process() {
         guard mode == .live else { return }
         mode = .processing
@@ -394,7 +414,6 @@ final class VoiceBadge: NSView {
         stopMic()
     }
 
-    // the text went to the clipboard: the spinner gives way to a copy icon before the badge folds away
     // the text landed: in the field (a check) or in the clipboard (a copy icon); the spinner gives way to it before
     // the badge folds away
     func done(_ outcome: Mode) {
@@ -667,6 +686,194 @@ final class Indicator {
     }
 }
 
+// MARK: - Caret bar: Claude Code /voice's own indicator, next to the text caret
+// Claude Code 2.1.292 swaps its cursor cell for a block glyph " ▁▂▃▄▅▆▇█" while recording: level x1.8 capped at 1,
+// smoothed w = w*0.7 + x*0.3 every 50 ms, glyph = round(w*8) in 1...8; gray (128,128,128) under level 0.15, else
+// hsl(hue 90°/s, s 0.7, l 0.6). Processing pulses 153..185 gray over 2 s. Other apps' carets can't be restyled, so a
+// cell-sized transparent panel sits just right of the real one and draws that block.
+
+final class CaretBar: NSView {
+    enum Mode { case off, live, processing }
+
+    private let meter = LevelMeter()
+    private var smoothed: CGFloat = 0
+    private var timer: Timer?
+    private var startedAt = Date()
+    private(set) var mode = Mode.off
+
+    func listen(device: AudioDeviceID?) {
+        guard mode == .off else { return }
+        mode = .live
+        smoothed = 0
+        startedAt = Date()
+        meter.start(device: device)
+        timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in self?.step() }
+        RunLoop.main.add(timer!, forMode: .common)
+    }
+
+    private func step() {
+        if mode == .live { meter.watch() }
+        needsDisplay = true
+    }
+
+    func process() {
+        guard mode == .live else { return }
+        mode = .processing
+        startedAt = Date()
+        meter.stop()
+    }
+
+    func off() {
+        mode = .off
+        meter.stop()
+        timer?.invalidate()
+        timer = nil
+    }
+
+    private static func hsl(hue: CGFloat) -> NSColor {
+        let t = (hue.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
+        let c: CGFloat = (1 - abs(2 * 0.6 - 1)) * 0.7, x = c * (1 - abs((t / 60).truncatingRemainder(dividingBy: 2) - 1)), m = 0.6 - c / 2
+        let (r, g, b): (CGFloat, CGFloat, CGFloat) =
+            t < 60 ? (c, x, 0) : t < 120 ? (x, c, 0) : t < 180 ? (0, c, x) : t < 240 ? (0, x, c) : t < 300 ? (x, 0, c) : (c, 0, x)
+        return NSColor(srgbRed: r + m, green: g + m, blue: b + m, alpha: 1)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let elapsed = CGFloat(Date().timeIntervalSince(startedAt))
+        switch mode {
+        case .off: return
+        case .processing:
+            let k = (sin(elapsed * .pi * 2 / 2) + 1) / 2
+            NSColor(srgbRed: (153 + 32 * k) / 255, green: (153 + 32 * k) / 255, blue: (153 + 32 * k) / 255, alpha: 1).setFill()
+            bounds.fill()
+        case .live:
+            smoothed = smoothed * 0.7 + min(meter.level * 1.8, 1) * 0.3
+            let eighths = max(1, min((smoothed * 8).rounded(), 8))
+            (meter.level < 0.15 ? NSColor(srgbRed: 128 / 255, green: 128 / 255, blue: 128 / 255, alpha: 1) : Self.hsl(hue: elapsed * 90)).setFill()
+            NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height * eighths / 8).fill()
+        }
+    }
+}
+
+final class CaretIndicator {
+    let bar = CaretBar(frame: NSRect(x: 0, y: 0, width: 9, height: 18))
+    private let panel: NSPanel
+
+    init() {
+        panel = NSPanel(contentRect: bar.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.level = .statusBar
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        panel.animationBehavior = .none
+        panel.contentView = bar
+    }
+
+    func show() {
+        bar.off()
+        follow()
+        panel.orderFrontRegardless()
+    }
+
+    // one character cell just right of the caret (a terminal cell is about half as wide as the line is tall);
+    // without a caret from the app, beside the mouse pointer
+    func follow() {
+        let frame: NSRect
+        if let caret = caretRect(), let primary = NSScreen.screens.first {
+            let h = min(max(caret.height, 12), 40)
+            frame = NSRect(x: caret.minX + 3, y: primary.frame.height - caret.maxY + (caret.height - h) / 2,
+                           width: (h * 0.5).rounded(), height: h)
+        } else {
+            let m = NSEvent.mouseLocation
+            frame = NSRect(x: m.x + 12, y: m.y - 22, width: 9, height: 18)
+        }
+        if frame != panel.frame { panel.setFrame(frame, display: true) }
+    }
+
+    func hide() {
+        bar.off()
+        panel.orderOut(nil)
+    }
+}
+
+func frame(of element: AXUIElement) -> CGRect? {
+    var pos: CFTypeRef?, size: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &pos) == .success,
+          AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &size) == .success,
+          let pos, let size else { return nil }
+    var p = CGPoint.zero, s = CGSize.zero
+    AXValueGetValue(pos as! AXValue, .cgPoint, &p)
+    AXValueGetValue(size as! AXValue, .cgSize, &s)
+    return CGRect(origin: p, size: s)
+}
+
+// Insertion point in global top-left coordinates, for any app, from the text around the caret:
+// - the right edge of the character before it, unless that is a line break (its box sits on the previous line);
+// - else the left edge of the character under it, unless that is a line break too;
+// - else the empty range at the caret (apps answer that one least reliably, so it comes last).
+// Some apps then still place it outside their own field (Telegram: an empty field's caret 11 pt above it); the
+// field's frame is right, so the caret is pulled into it.
+func caretRect() -> CGRect? {
+    guard let element = focusedElement() else { return nil }
+    var rangeRef: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+          let rv = rangeRef else { return nil }
+    var range = CFRange()
+    guard AXValueGetValue(rv as! AXValue, .cfRange, &range) else { return nil }
+    let caret = range.location + range.length
+
+    var valueRef: CFTypeRef?
+    AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &valueRef)
+    let text = valueRef as? NSString  // AX ranges count UTF-16 units, as NSString does
+
+    func bounds(_ location: Int, _ length: Int) -> CGRect? {
+        var query = CFRange(location: location, length: length)
+        guard let q = AXValueCreate(.cfRange, &query) else { return nil }
+        var b: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(element, kAXBoundsForRangeParameterizedAttribute as CFString, q, &b) == .success,
+              let b else { return nil }
+        var rect = CGRect.zero
+        guard AXValueGetValue(b as! AXValue, .cgRect, &rect), rect.height > 0 else { return nil }
+        return rect
+    }
+    func isBreak(_ i: Int) -> Bool {
+        guard let text, i >= 0, i < text.length else { return false }
+        return [10, 13, 0x2028, 0x2029].contains(text.character(at: i))
+    }
+    // a box taller than a line is the field, not a character: keep one line of it
+    func caretLine(x: CGFloat, _ r: CGRect, alignBottom: Bool) -> CGRect {
+        let line = min(r.height, 40)
+        return CGRect(x: x, y: alignBottom ? r.maxY - line : r.minY, width: 0, height: line)
+    }
+
+    var result: CGRect
+    if caret > 0, !isBreak(caret - 1), let r = bounds(caret - 1, 1) {
+        result = caretLine(x: r.maxX, r, alignBottom: true)
+    } else if let text, caret < text.length, !isBreak(caret), let r = bounds(caret, 1) {
+        result = caretLine(x: r.minX, r, alignBottom: true)
+    } else if let r = bounds(caret, 0) {
+        result = caretLine(x: r.minX, r, alignBottom: false)
+    } else {
+        return nil
+    }
+
+    if let field = frame(of: element), field.height > 0,
+       !field.insetBy(dx: -2, dy: -2).contains(CGPoint(x: result.minX, y: result.midY)) {
+        result.origin.x = min(max(result.minX, field.minX), field.maxX)
+        result.origin.y = field.height < result.height * 2.5 ? field.midY - result.height / 2 : field.minY + 2
+    }
+    return result
+}
+
+// Which indicator a dictation shows, from the menu bar menu; kept across launches.
+enum IndicatorStyle: String { case badge, caret }
+var indicatorStyle: IndicatorStyle {
+    get { IndicatorStyle(rawValue: UserDefaults.standard.string(forKey: "indicator") ?? "") ?? .badge }
+    set { UserDefaults.standard.set(newValue.rawValue, forKey: "indicator") }
+}
+
 // Chrome and Electron build their accessibility tree (and so report the focused field) only when asked.
 func enableAppAccessibility() {
     guard let app = NSWorkspace.shared.frontmostApplication else { return }
@@ -826,6 +1033,8 @@ final class Dictation {
 
     let pty = ClaudePty()
     let indicator = Indicator()
+    let caret = CaretIndicator()
+    var style = IndicatorStyle.badge  // picked as a dictation begins
     var phase = Phase.idle
     var isActive: Bool { phase == .holding || phase == .finishing }  // keys are blocked only then
     var cancelled = false
@@ -890,8 +1099,15 @@ final class Dictation {
         typed = []
         target = focus == .field ? field : nil
         Mic.useBuiltIn()
-        indicator.show()
-        indicator.badge.listen(device: Mic.builtIn)
+        style = indicatorStyle
+        switch style {
+        case .badge:
+            indicator.show()
+            indicator.badge.listen(device: Mic.builtIn)
+        case .caret:
+            caret.show()
+            caret.bar.listen(device: Mic.builtIn)
+        }
         startSpaces()
     }
 
@@ -948,7 +1164,7 @@ final class Dictation {
         continuing = false
         searchUntil = nil
         stopSpaces()
-        indicator.badge.process()
+        style == .badge ? indicator.badge.process() : caret.bar.process()
         phase = .finishing
         releasedAt = Date()
     }
@@ -985,6 +1201,7 @@ final class Dictation {
     }
 
     private func tick() {
+        if style == .caret, phase == .holding || phase == .finishing { caret.follow() }  // it moves as text is typed
         switch phase {
         case .idle, .arming: return
         case .holding:
@@ -1032,21 +1249,20 @@ final class Dictation {
         phase = .idle
         Mic.restore()
         log("done: \(text.count) chars\(cancelled ? ", cancelled" : "")\(detached ? (target == nil ? ", to the clipboard" : ", focus moved, to the clipboard") : "")")
-        if text.isEmpty, !cancelled {
+        // the clipboard only when the text did not land in a field: typed text leaves it alone
+        if !cancelled, !text.isEmpty, detached {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(text, forType: .string)
+        }
+        if style == .caret { return caret.hide() }
+        if cancelled { return indicator.hide() }
+        if text.isEmpty {
             indicator.badge.empty()
             return indicator.hide(after: 0.7)
         }
-        guard !cancelled else { return indicator.hide() }
-        // the clipboard only when the text did not land in a field: typed text leaves it alone
-        guard detached else {
-            indicator.badge.done(.typed)
-            return indicator.hide(after: 0.8)
-        }
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(text, forType: .string)
-        indicator.badge.done(.copied)
-        indicator.hide(after: 0.9)
+        indicator.badge.done(detached ? .copied : .typed)
+        indicator.hide(after: detached ? 0.9 : 0.8)
     }
 }
 
@@ -1116,6 +1332,36 @@ let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLe
 statusItem.button?.image = NSImage(systemSymbolName: "mic", accessibilityDescription: "Claude Dictate")
 let menu = NSMenu()
 menu.addItem(NSMenuItem(title: "Hold Fn to speak · Esc cancels", action: nil, keyEquivalent: ""))
+menu.addItem(.separator())
+
+final class StyleMenu: NSObject {
+    let items: [(IndicatorStyle, NSMenuItem)]
+
+    override init() {
+        items = [(.badge, "Badge at the pointer"), (.caret, "Bar at the caret (Claude Code style)")]
+            .map { style, title in (style, NSMenuItem(title: title, action: #selector(pick(_:)), keyEquivalent: "")) }
+        super.init()
+        for (style, item) in items {
+            item.target = self
+            item.representedObject = style.rawValue
+        }
+        refresh()
+    }
+
+    @objc func pick(_ item: NSMenuItem) {
+        guard let raw = item.representedObject as? String, let style = IndicatorStyle(rawValue: raw) else { return }
+        indicatorStyle = style
+        refresh()
+    }
+
+    private func refresh() {
+        for (style, item) in items { item.state = style == indicatorStyle ? .on : .off }
+    }
+}
+
+let styleMenu = StyleMenu()
+menu.addItem(NSMenuItem(title: "Indicator", action: nil, keyEquivalent: ""))
+styleMenu.items.forEach { menu.addItem($0.1) }
 menu.addItem(.separator())
 menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 statusItem.menu = menu
