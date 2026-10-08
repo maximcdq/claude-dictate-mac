@@ -9,4 +9,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build
-        run: swiftc -O -target arm64-apple-macos26.0 -o ClaudeDictate Sources/main.swift
+        run: swift build -c release
+      - name: Test
+        run: swift test
+      - name: Bundle
+        run: scripts/bundle.sh
