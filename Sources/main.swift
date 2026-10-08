@@ -721,12 +721,35 @@ func focusState(_ element: AXUIElement?) -> Focus {
 
 func focusedTakesText(_ element: AXUIElement?) -> Bool {
     guard let element, onScreen(element) else { return false }
-    var range: CFTypeRef?
-    if AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &range) == .success, range != nil {
+    if ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"].contains(where: { role(of: element).hasPrefix($0) }) {
         return true
     }
-    // a text role without a caret reported: Chrome's fields while its tree is still being built
-    return ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"].contains { role(of: element).hasPrefix($0) }
+    var value: CFTypeRef?
+    // a web page reports a caret on every element (text can be selected anywhere): there only an element inside an
+    // editable one takes text (inputs, contenteditable editors); typed elsewhere, letters fire the page's shortcuts
+    if AXUIElementCopyAttributeValue(element, "AXEditableAncestor" as CFString, &value) == .success, value != nil {
+        return true
+    }
+    if inWebArea(element) { return false }
+    // a caret alone counts only on an element of no standard role (a custom text view): Chrome's toolbar buttons and
+    // groups report one too
+    let nonText = ["AXButton", "AXGroup", "AXLink", "AXStaticText", "AXImage", "AXList", "AXTable", "AXOutline", "AXRow",
+                   "AXCell", "AXScrollArea", "AXToolbar", "AXWindow", "AXMenu", "AXCheckBox", "AXRadioButton",
+                   "AXPopUpButton", "AXTabGroup", "AXSplitGroup", "AXSlider", "AXApplication"]
+    if nonText.contains(where: { role(of: element).hasPrefix($0) }) { return false }
+    return AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &value) == .success && value != nil
+}
+
+func inWebArea(_ element: AXUIElement) -> Bool {
+    var current: AXUIElement? = element
+    for _ in 0..<60 {
+        guard let e = current else { return false }
+        if role(of: e).hasPrefix("AXWebArea") { return true }
+        var parent: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(e, kAXParentAttribute as CFString, &parent) == .success, let parent else { return false }
+        current = (parent as! AXUIElement)
+    }
+    return false
 }
 
 final class Dictation {
