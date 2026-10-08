@@ -1,0 +1,12 @@
+name: build
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swiftc -O -target arm64-apple-macos26.0 -o ClaudeDictate Sources/main.swift

@@ -260,6 +260,10 @@ final class VoiceBadge: NSView {
     private var shownAt = Date()
     private var leavingAt: Date?  // set while the badge fades out: the content eases down with it
     private(set) var mode = Mode.off
+    private var device: AudioDeviceID?
+    private var lastBufferAt = Date()
+    private var restartedAt = Date()
+    private var configObserver: NSObjectProtocol?
 
     func listen(device: AudioDeviceID?) {
         guard mode == .off else { return }
@@ -269,6 +273,28 @@ final class VoiceBadge: NSView {
         startedAt = Date()
         shownAt = Date()
         leavingAt = nil
+        self.device = device
+        startMic()
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.step() }
+        RunLoop.main.add(timer!, forMode: .common)
+    }
+
+    private func step() {
+        // The engine stops without a word when its device changes under it (Claude opening the same mic in another
+        // format does that), and the badge would sit black while the transcript runs: no buffers for a while, even
+        // silent ones, means it went quiet, so it starts over.
+        let now = Date()
+        if mode == .live, now.timeIntervalSince(lastBufferAt) > 0.4, now.timeIntervalSince(restartedAt) > 1 {
+            log("mic: no audio reaching the badge, restarting its engine")
+            stopMic()
+            startMic()
+        }
+        needsDisplay = true
+    }
+
+    private func startMic() {
+        restartedAt = Date()
+        lastBufferAt = Date()
         engine = AVAudioEngine()
         let input = engine.inputNode
         // bound to the device itself: an engine on the default input stops dead (no buffers) when the default
@@ -277,18 +303,28 @@ final class VoiceBadge: NSView {
             AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
                                  &id, UInt32(MemoryLayout<AudioDeviceID>.size))
         }
-        input.installTap(onBus: 0, bufferSize: 1024, format: input.inputFormat(forBus: 0)) { [weak self] buf, _ in
+        let format = input.inputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else { log("mic: the input has no format yet"); return }
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buf, _ in
             guard let ch = buf.floatChannelData?[0] else { return }
             let n = Int(buf.frameLength)
             var sum: Float = 0
             for i in 0..<n { sum += ch[i] * ch[i] }
             let rms16 = sqrt(sum / Float(max(n, 1))) * 32768  // Claude measures 16-bit samples
             let v = CGFloat(sqrt(min(rms16 / 2000, 1)))
-            DispatchQueue.main.async { self?.level = v }
+            DispatchQueue.main.async {
+                self?.level = v
+                self?.lastBufferAt = Date()
+            }
+        }
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            guard let self, self.mode == .live else { return }
+            log("mic: the badge's engine was reconfigured, restarting it")
+            self.stopMic()
+            self.startMic()
         }
         do { try engine.start() } catch { log("mic: \(error)") }
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.needsDisplay = true }
-        RunLoop.main.add(timer!, forMode: .common)
     }
 
     func process() {
@@ -310,6 +346,8 @@ final class VoiceBadge: NSView {
     }
 
     private func stopMic() {
+        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
+        configObserver = nil
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
     }
