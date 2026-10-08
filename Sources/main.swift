@@ -251,7 +251,7 @@ enum Mic {
 // which sit badly on the glass).
 
 final class VoiceBadge: NSView {
-    enum Mode { case off, live, processing, copied, empty }
+    enum Mode { case off, live, processing, typed, copied, empty }
 
     // An AudioQueue at 16 kHz mono 16-bit: AVAudioEngine got stuck for good inside Core Audio (enumerating
     // sub-devices) on macOS 27. Opening one can still block, so it opens off the main thread, and the Fn event tap
@@ -265,7 +265,7 @@ final class VoiceBadge: NSView {
     private var timer: Timer?
     private var startedAt = Date()  // hue clock, runs on through processing so the color doesn't jump
     private var processingAt = Date()
-    private var copiedAt = Date()
+    private var doneAt = Date()
     private var emptyAt = Date()
     // nothing came of the dictation: a soft coral, not an alarm red
     private static let nothing = NSColor(srgbRed: 1.0, green: 0.5, blue: 0.47, alpha: 1)
@@ -395,11 +395,13 @@ final class VoiceBadge: NSView {
     }
 
     // the text went to the clipboard: the spinner gives way to a copy icon before the badge folds away
-    func copied() {
+    // the text landed: in the field (a check) or in the clipboard (a copy icon); the spinner gives way to it before
+    // the badge folds away
+    func done(_ outcome: Mode) {
         guard mode == .live || mode == .processing else { return }
         if mode == .live { processingAt = Date() }
-        mode = .copied
-        copiedAt = Date()
+        mode = outcome
+        doneAt = Date()
         stopMic()
     }
 
@@ -438,6 +440,28 @@ final class VoiceBadge: NSView {
         let i = Int(t), f = (1 - cos((t - CGFloat(i)) * .pi)) / 2
         let a = palette[i], b = palette[(i + 1) % palette.count]
         return NSColor(srgbRed: a.0 + (b.0 - a.0) * f, green: a.1 + (b.1 - a.1) * f, blue: a.2 + (b.2 - a.2) * f, alpha: 1)
+    }
+
+    // a check mark, drawn from its left tip down and up to the right as `progress` runs 0 → 1
+    private func check(_ color: NSColor, progress: CGFloat, scale: CGFloat, center: CGPoint) {
+        let points = [CGPoint(x: -5.5, y: 0.5), CGPoint(x: -1.8, y: -3.5), CGPoint(x: 5.5, y: 4.5)]
+            .map { CGPoint(x: center.x + $0.x * scale, y: center.y + $0.y * scale) }
+        let first = hypot(points[1].x - points[0].x, points[1].y - points[0].y)
+        let second = hypot(points[2].x - points[1].x, points[2].y - points[1].y)
+        let eased = 1 - pow(1 - progress, 2)
+        var left = (first + second) * eased
+        let path = NSBezierPath()
+        path.move(to: points[0])
+        for (from, to, length) in [(points[0], points[1], first), (points[1], points[2], second)] where left > 0 {
+            let f = min(left / length, 1)
+            path.line(to: CGPoint(x: from.x + (to.x - from.x) * f, y: from.y + (to.y - from.y) * f))
+            left -= length
+        }
+        path.lineWidth = 2.6 * scale
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        color.setStroke()
+        path.stroke()
     }
 
     private func mic(_ color: NSColor, size: CGFloat, center: CGPoint, symbol: String = "mic.fill") {
@@ -532,19 +556,28 @@ final class VoiceBadge: NSView {
             let k = min(CGFloat(now.timeIntervalSince(emptyAt)) / 0.25, 1)
             let eased = k * k * (3 - 2 * k)
             spinner(CGFloat(now.timeIntervalSince(processingAt)), hue.blended(withFraction: eased, of: Self.nothing)!, 0.6 * eased)
-        case .copied:
-            // the spinner dissolves in 0.2 s while the copy icon springs in (0.3 s, a touch of overshoot)
-            let since = CGFloat(now.timeIntervalSince(copiedAt))
+        case .typed, .copied:
+            // the spinner dissolves in 0.2 s; a soft burst of the color spreads from the center once, and the icon
+            // springs in (0.3 s, a touch of overshoot): a check drawn stroke by stroke, or the copy icon
+            let since = CGFloat(now.timeIntervalSince(doneAt))
             let k = min(since / 0.2, 1)
             faded(1 - k) { spinner(CGFloat(now.timeIntervalSince(processingAt)), hue, 0) }
             faded(k) {
+                let b = min(since / 0.45, 1)
+                let burst = outline.height / 2 * (0.45 + 0.75 * (1 - pow(1 - b, 3)))
+                hue.withAlphaComponent(0.32 * (1 - b)).setFill()
+                NSBezierPath(ovalIn: NSRect(x: center.x - burst, y: center.y - burst, width: burst * 2, height: burst * 2)).fill()
                 let ring = capsule()
                 ring.lineWidth = 1.5
                 hue.withAlphaComponent(0.6).setStroke()
                 ring.stroke()
                 let p = min(since / 0.3, 1)
                 let spring = 1 + 1.7 * pow(p - 1, 3) + 0.7 * pow(p - 1, 2)
-                mic(hue, size: 13 * spring * pop, center: center, symbol: "doc.on.doc.fill")
+                if mode == .copied {
+                    mic(hue, size: 13 * spring * pop, center: center, symbol: "doc.on.doc.fill")
+                } else {
+                    check(hue, progress: min(since / 0.28, 1), scale: spring * pop, center: center)
+                }
             }
         }
     }
@@ -986,12 +1019,16 @@ final class Dictation {
             indicator.badge.empty()
             return indicator.hide(after: 0.7)
         }
+        guard !cancelled else { return indicator.hide() }
         // the clipboard only when the text did not land in a field: typed text leaves it alone
-        guard !text.isEmpty, !cancelled, detached else { return indicator.hide() }
+        guard detached else {
+            indicator.badge.done(.typed)
+            return indicator.hide(after: 0.8)
+        }
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(text, forType: .string)
-        indicator.badge.copied()
+        indicator.badge.done(.copied)
         indicator.hide(after: 0.9)
     }
 }
