@@ -785,14 +785,14 @@ final class CaretIndicator {
         panel.orderFrontRegardless()
     }
 
-    // one character cell just right of the caret (a terminal cell is about half as wide as the line is tall);
-    // without a caret from the app, beside the mouse pointer
+    // a slim bar just past the character cell at the caret (a terminal cell is about half as wide as the line is
+    // tall, and a terminal draws its own block cursor over it); without a caret from the app, beside the mouse pointer
     func follow() {
         let frame: NSRect
         if let caret = caretRect(), let primary = NSScreen.screens.first {
             let h = min(max(caret.height, 12), 40)
-            frame = NSRect(x: caret.minX + 3, y: primary.frame.height - caret.maxY + (caret.height - h) / 2,
-                           width: (h * 0.5).rounded(), height: h)
+            frame = NSRect(x: caret.minX + (h * 0.5).rounded() + 2, y: primary.frame.height - caret.maxY + (caret.height - h) / 2,
+                           width: (h * 0.35).rounded(), height: h)
         } else {
             let m = NSEvent.mouseLocation
             frame = NSRect(x: m.x + 12, y: m.y - 22, width: 9, height: 18)
