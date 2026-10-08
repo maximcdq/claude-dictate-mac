@@ -1,0 +1,27 @@
+# A published release gets ClaudeDictate.zip: the universal app, ad-hoc signed. Installed apps update themselves from
+# it (Sources/DictateUpdater) and sign it again with their local identity.
+name: release
+on:
+  release:
+    types: [published]
+permissions:
+  contents: write
+jobs:
+  app:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - name: Version matches the tag
+        run: test "v$(tr -d '[:space:]' < VERSION)" = "${{ github.event.release.tag_name }}"
+      - name: Bundle
+        run: scripts/bundle.sh --universal
+      - name: Sign and zip
+        run: |
+          codesign --force --sign - --identifier local.claude-dictate build/ClaudeDictate.app
+          ditto -c -k --keepParent build/ClaudeDictate.app ClaudeDictate.zip
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" ClaudeDictate.zip --clobber
