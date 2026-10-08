@@ -1,6 +1,6 @@
 # Contributing
 
-Pull requests are welcome: fork, branch off `main`, open a PR. `main` is protected; every change goes through a
+Pull requests are welcome: fork, branch off `master`, open a PR. `master` is protected; every change goes through a
 reviewed PR.
 
 - Build and run your change locally: `./install.sh` rebuilds and restarts the app; watch
