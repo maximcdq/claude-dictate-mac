@@ -640,8 +640,33 @@ func role(of element: AXUIElement?) -> String {
 
 // Whether the focused element takes typed text: it has a text caret (a selected text range). The desktop, a file
 // list, a button have none, so Fn there does nothing.
+// Whether the element is in sight: its center inside a window of its app that the window server shows, and on a
+// screen. A hidden window keeps its app and field focused (iTerm's hotkey window once it slides away, minimized windows),
+// and Show Desktop slides the windows off the edges: text typed there would land out of sight. An element that reports
+// no frame counts as visible when its app shows any window.
+func onScreen(_ element: AXUIElement) -> Bool {
+    var pid: pid_t = 0
+    AXUIElementGetPid(element, &pid)
+    let windows = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+        as? [[String: Any]] ?? [])
+        .filter { ($0[kCGWindowOwnerPID as String] as? pid_t) == pid }
+        .compactMap { ($0[kCGWindowBounds as String] as! CFDictionary?).flatMap { CGRect(dictionaryRepresentation: $0) } }
+    var pos: CFTypeRef?, size: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &pos) == .success,
+          AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &size) == .success,
+          let pos, let size else { return !windows.isEmpty }
+    var p = CGPoint.zero, s = CGSize.zero
+    AXValueGetValue(pos as! AXValue, .cgPoint, &p)
+    AXValueGetValue(size as! AXValue, .cgSize, &s)
+    // accessibility and the window server measure from the top-left of the primary screen, AppKit from its bottom-left
+    let center = CGPoint(x: p.x + s.width / 2, y: p.y + s.height / 2)
+    let primary = NSScreen.screens.first?.frame.height ?? 0
+    return windows.contains { $0.contains(center) }
+        && NSScreen.screens.contains { $0.frame.contains(CGPoint(x: center.x, y: primary - center.y)) }
+}
+
 func focusedTakesText(_ element: AXUIElement?) -> Bool {
-    guard let element else { return false }
+    guard let element, onScreen(element) else { return false }
     var range: CFTypeRef?
     if AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &range) == .success, range != nil {
         return true
@@ -708,6 +733,7 @@ final class Dictation {
         enableAppAccessibility()  // Chrome and Electron only report their fields once asked
         let field = focusedElement()
         let takesText = focusedTakesText(field)
+        if takesText { log("typing into \(role(of: field)) in \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?")") }
         phase = .holding
         cancelled = false
         // without a field the recording starts all the same, so no word is lost: the text waits for a field that
@@ -822,6 +848,7 @@ final class Dictation {
                     self.searchUntil = nil
                     target = field
                     detached = false
+                    log("typing into \(role(of: field)) in \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?")")
                 } else if Date() > searchUntil {
                     self.searchUntil = nil
                     log("no text field in focus (\(role(of: field)) in \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?")): the text goes to the clipboard")
