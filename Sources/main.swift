@@ -626,7 +626,8 @@ final class Dictation {
     var phase = Phase.idle
     var isActive: Bool { phase == .holding || phase == .finishing }  // keys are blocked only then
     var cancelled = false
-    var detached = false  // focus left the field: stop typing, the final text still goes to the clipboard
+    var detached = false  // no field, or focus left it: nothing is typed, the final text goes to the clipboard
+    var searchUntil: Date?  // no field at Fn: Chrome may still be building its tree, so look a little longer
     var releasedAt = Date()
     var spaceTimer: Timer?
     var pollTimer: Timer?
@@ -669,26 +670,20 @@ final class Dictation {
         phase = .idle
     }
 
-    private func begin(attempt: Int = 0) {
+    private func begin() {
         guard phase == .arming else { return }
         enableAppAccessibility()  // Chrome and Electron only report their fields once asked
         let field = focusedElement()
-        guard focusedTakesText(field) else {
-            // they build that tree only then: ask again for half a second before giving up
-            if attempt < 5 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.begin(attempt: attempt + 1) }
-                return
-            }
-            phase = .idle
-            log("fn ignored: no text field in focus (\(role(of: field)) in \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?"))")
-            return
-        }
+        let takesText = focusedTakesText(field)
         phase = .holding
         cancelled = false
-        detached = false
+        // without a field the recording starts all the same, so no word is lost: the text waits for a field that
+        // shows up within half a second, or else goes to the clipboard
+        detached = !takesText
+        searchUntil = takesText ? nil : Date().addingTimeInterval(0.5)
         continuing = false
         typed = []
-        target = field
+        target = takesText ? field : nil
         Mic.useBuiltIn()
         indicator.show()
         indicator.badge.listen(device: Mic.builtIn)
@@ -746,6 +741,7 @@ final class Dictation {
     private func release() {
         guard phase == .holding else { return }
         continuing = false
+        searchUntil = nil
         stopSpaces()
         indicator.badge.process()
         phase = .finishing
@@ -787,6 +783,17 @@ final class Dictation {
         switch phase {
         case .idle, .arming: return
         case .holding:
+            if let searchUntil {
+                let field = focusedElement()
+                if focusedTakesText(field) {
+                    self.searchUntil = nil
+                    target = field
+                    detached = false
+                } else if Date() > searchUntil {
+                    self.searchUntil = nil
+                    log("no text field in focus (\(role(of: field)) in \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?")): the text goes to the clipboard")
+                }
+            }
             sync(live())
             if continuing {
                 guard finalIn(since: pausedAt) else { return }
@@ -819,8 +826,9 @@ final class Dictation {
         phase = .idle
         indicator.hide()
         Mic.restore()
-        log("done: \(text.count) chars\(cancelled ? ", cancelled" : "")\(detached ? ", focus moved" : "")")
-        guard !text.isEmpty, !cancelled else { return }
+        log("done: \(text.count) chars\(cancelled ? ", cancelled" : "")\(detached ? (target == nil ? ", to the clipboard" : ", focus moved, to the clipboard") : "")")
+        // the clipboard only when the text did not land in a field: typed text leaves it alone
+        guard !text.isEmpty, !cancelled, detached else { return }
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(text, forType: .string)

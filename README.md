@@ -8,6 +8,7 @@ text is typed right where the caret is, live, as you talk. Release Fn and it set
 - No time limit while Fn is held: Claude Code stops a recording after 2 minutes or 15 s of silence; ClaudeDictate
   picks up right after and keeps appending to the same text.
 - A small Liquid Glass badge next to the pointer reacts to your voice in Claude Code's own colors.
+- No text field? Speak anyway: the text lands in the clipboard.
 - **Esc** cancels and erases what this dictation typed.
 - Costs nothing extra: per [Claude Code docs](https://code.claude.com/docs/en/voice-dictation), transcription "does not
   consume Claude messages or tokens and does not count toward the limits shown in `/usage`". The helper session never
@@ -62,7 +63,9 @@ types the diff into the focused field
 5. When Claude Code ends a recording on its own (2 min / 15 s of silence) while Fn is still held, the app waits for
    that part's final text and starts the next recording, which appends to the same prompt.
 
-If focus moves to another field mid-dictation, typing stops and the final text goes to the clipboard.
+No text field in focus (the desktop, a file list, a page without an input): the dictation runs all the same and the
+final text goes to the clipboard. The same happens if focus moves to another field mid-dictation. Text that was typed
+into a field leaves the clipboard untouched.
 
 While dictating, the default input switches to the Mac's built-in mic so AirPods stay in high-quality audio mode; the
 previous input is restored afterwards.
@@ -79,8 +82,8 @@ previous input is restored afterwards.
 
 ## Troubleshooting
 
-- **Nothing happens on Fn**: check the log. `fn ignored: no text field in focus` means the focused element has no
-  caret; `claude is still starting` shows during the first seconds after launch. In System Settings → Keyboard set
+- **Nothing happens on Fn**: check the log. `claude is still starting` shows during the first seconds after launch;
+  `no text field in focus (…)` names what was focused when the text went to the clipboard instead. In System Settings → Keyboard set
   *Press 🌐 key to* "Do Nothing", or macOS will open the emoji picker / its own dictation.
 - **`Voice mode requires a Claude.ai account`** in the log: run `claude` in a terminal and `/login`.
 - **No permission prompts / typing doesn't work**: remove ClaudeDictate from Accessibility, run `./install.sh` again.
