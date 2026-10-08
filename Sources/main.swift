@@ -251,7 +251,7 @@ enum Mic {
 // which sit badly on the glass).
 
 final class VoiceBadge: NSView {
-    enum Mode { case off, live, processing }
+    enum Mode { case off, live, processing, copied }
 
     // AVAudioEngine can block for seconds while Core Audio reshuffles devices: it lives on a queue of its own, so the
     // main thread, and with it the Fn event tap, never waits on it
@@ -263,6 +263,7 @@ final class VoiceBadge: NSView {
     private var timer: Timer?
     private var startedAt = Date()  // hue clock, runs on through processing so the color doesn't jump
     private var processingAt = Date()
+    private var copiedAt = Date()
     private var shownAt = Date()
     private var leavingAt: Date?  // set while the badge fades out: the content eases down with it
     private(set) var mode = Mode.off
@@ -358,6 +359,15 @@ final class VoiceBadge: NSView {
         stopMic()
     }
 
+    // the text went to the clipboard: the spinner gives way to a copy icon before the badge folds away
+    func copied() {
+        guard mode == .live || mode == .processing else { return }
+        if mode == .live { processingAt = Date() }
+        mode = .copied
+        copiedAt = Date()
+        stopMic()
+    }
+
     func leave() {
         leavingAt = Date()
     }
@@ -386,10 +396,10 @@ final class VoiceBadge: NSView {
         return NSColor(srgbRed: a.0 + (b.0 - a.0) * f, green: a.1 + (b.1 - a.1) * f, blue: a.2 + (b.2 - a.2) * f, alpha: 1)
     }
 
-    private func mic(_ color: NSColor, size: CGFloat, center: CGPoint) {
+    private func mic(_ color: NSColor, size: CGFloat, center: CGPoint, symbol: String = "mic.fill") {
         let config = NSImage.SymbolConfiguration(pointSize: size, weight: .semibold)
             .applying(NSImage.SymbolConfiguration(paletteColors: [color]))
-        guard let image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: nil)?
+        guard let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(config) else { return }
         let s = image.size
         image.draw(in: NSRect(x: center.x - s.width / 2, y: center.y - s.height / 2, width: s.width, height: s.height))
@@ -471,6 +481,20 @@ final class VoiceBadge: NSView {
             }
         case .processing:
             spinner(CGFloat(now.timeIntervalSince(processingAt)))
+        case .copied:
+            // the spinner dissolves in 0.2 s while the copy icon springs in (0.3 s, a touch of overshoot)
+            let since = CGFloat(now.timeIntervalSince(copiedAt))
+            let k = min(since / 0.2, 1)
+            faded(1 - k) { spinner(CGFloat(now.timeIntervalSince(processingAt))) }
+            faded(k) {
+                let ring = capsule()
+                ring.lineWidth = 1.5
+                hue.withAlphaComponent(0.6).setStroke()
+                ring.stroke()
+                let p = min(since / 0.3, 1)
+                let spring = 1 + 1.7 * pow(p - 1, 3) + 0.7 * pow(p - 1, 2)
+                mic(hue, size: 13 * spring * pop, center: center, symbol: "doc.on.doc.fill")
+            }
         }
     }
 }
@@ -532,6 +556,15 @@ final class Indicator {
             origin.y = min(max(origin.y, f.minY), f.maxY - Self.size.height)
         }
         if origin != panel.frame.origin { panel.setFrameOrigin(origin) }
+    }
+
+    // after a moment on screen, unless a new dictation shows the badge meanwhile
+    func hide(after delay: TimeInterval) {
+        let shown = generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.generation == shown else { return }
+            self.hide()
+        }
     }
 
     func hide() {
@@ -824,14 +857,15 @@ final class Dictation {
     private func finish(text: String) {
         try? "clear".write(toFile: controlFile, atomically: true, encoding: .utf8)
         phase = .idle
-        indicator.hide()
         Mic.restore()
         log("done: \(text.count) chars\(cancelled ? ", cancelled" : "")\(detached ? (target == nil ? ", to the clipboard" : ", focus moved, to the clipboard") : "")")
         // the clipboard only when the text did not land in a field: typed text leaves it alone
-        guard !text.isEmpty, !cancelled, detached else { return }
+        guard !text.isEmpty, !cancelled, detached else { return indicator.hide() }
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(text, forType: .string)
+        indicator.badge.copied()
+        indicator.hide(after: 0.9)
     }
 }
 
