@@ -1,1 +1,1 @@
-{ "name": "dictate-helper", "version": "0.1.2", "description": "ClaudeDictate helper: mirrors the /voice transcript to the app, never sends a prompt" }
+{ "name": "dictate-helper", "version": "0.1.3", "description": "ClaudeDictate helper: mirrors the /voice transcript to the app, never sends a prompt" }
