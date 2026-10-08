@@ -63,8 +63,9 @@ types the diff into the focused field
 5. When Claude Code ends a recording on its own (2 min / 15 s of silence) while Fn is still held, the app waits for
    that part's final text and starts the next recording, which appends to the same prompt.
 
-No text field in focus (the desktop, a file list, a page without an input): the dictation runs all the same and the
-final text goes to the clipboard. The same happens if focus moves to another field mid-dictation. Text that was typed
+Like any dictation app, it types into whatever has focus, in any app. Only when macOS reports that nothing there
+takes text (the desktop, a page with no field active, a hidden window, an app with no window in sight) does the final
+text go to the clipboard instead, with a copy icon on the badge. The same happens if focus moves to another field mid-dictation. Text that was typed
 into a field leaves the clipboard untouched.
 
 While dictating, the default input switches to the Mac's built-in mic so AirPods stay in high-quality audio mode; the

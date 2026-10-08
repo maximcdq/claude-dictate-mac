@@ -3,7 +3,7 @@
 // into it (what a held Space key looks like to a terminal app), the mod mirrors the prompt draft to
 // <state>/live.txt, and this app types it into the focused field as it comes, fixing it up to the final text.
 import AppKit
-import AVFoundation
+import AudioToolbox
 import CoreAudio
 import Darwin
 
@@ -203,7 +203,7 @@ enum Mic {
     // dies mid-dictation, the next start puts it back.
     private static let previousFile = "\(stateDir)/previous-input.txt"
 
-    private static func uid(_ id: AudioDeviceID) -> String? {
+    static func uid(_ id: AudioDeviceID) -> String? {
         var a = address(kAudioDevicePropertyDeviceUID)
         var value: Unmanaged<CFString>?
         var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
@@ -253,11 +253,13 @@ enum Mic {
 final class VoiceBadge: NSView {
     enum Mode { case off, live, processing, copied }
 
-    // AVAudioEngine can block for seconds while Core Audio reshuffles devices: it lives on a queue of its own, so the
-    // main thread, and with it the Fn event tap, never waits on it
-    private let micQueue = DispatchQueue(label: "badge.mic")
-    private var engine: AVAudioEngine?  // micQueue only
-    private var micBusy = false  // main: a start is queued or running
+    // An AudioQueue at 16 kHz mono 16-bit: AVAudioEngine got stuck for good inside Core Audio (enumerating
+    // sub-devices) on macOS 27. Opening one can still block, so it opens off the main thread, and the Fn event tap
+    // never waits on it; an open that hangs is left behind and a fresh one tried.
+    private static let levelQueue = DispatchQueue(label: "badge.level")
+    private var recorder: AudioQueueRef?
+    private var micAttempt = 0  // a recorder that opens after a newer attempt (or a stop) is closed at once
+    private var restarts = 0
     private var level: CGFloat = 0
     private var smoothed: CGFloat = 0
     private var timer: Timer?
@@ -272,6 +274,7 @@ final class VoiceBadge: NSView {
     private var restartedAt = Date()
     private var heardAt: Date?  // the first audio of this dictation; until then the badge spins
     static let introMin: TimeInterval = 0.45  // the spin shows at least this long, so the eye finds the badge
+    static let introMax: TimeInterval = 1.5  // and at most this long, even if no audio comes
     static let introFade: TimeInterval = 0.3
 
     func listen(device: AudioDeviceID?) {
@@ -283,6 +286,7 @@ final class VoiceBadge: NSView {
         shownAt = Date()
         leavingAt = nil
         heardAt = nil
+        restarts = 0
         self.device = device
         startMic()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.step() }
@@ -294,8 +298,10 @@ final class VoiceBadge: NSView {
         // format does that), and the badge would sit black while the transcript runs: no buffers for a while, even
         // silent ones, means it went quiet, so it starts over.
         let now = Date()
-        if mode == .live, !micBusy, now.timeIntervalSince(lastBufferAt) > 0.4, now.timeIntervalSince(restartedAt) > 0.6 {
-            log("mic: no audio reaching the badge, restarting its engine")
+        let backoff = 0.6 * pow(2, Double(min(restarts, 3)))  // a wedged Core Audio is not hammered
+        if mode == .live, now.timeIntervalSince(lastBufferAt) > 0.4, now.timeIntervalSince(restartedAt) > backoff {
+            restarts += 1
+            log("mic: no audio reaching the badge, restarting its recorder")
             stopMic()
             startMic()
         }
@@ -305,51 +311,77 @@ final class VoiceBadge: NSView {
     private func startMic() {
         restartedAt = Date()
         lastBufferAt = Date()
-        micBusy = true
-        let device = self.device
-        micQueue.async { [weak self] in
-            self?.startEngine(device: device)
-            DispatchQueue.main.async { self?.micBusy = false }
+        micAttempt += 1
+        let attempt = micAttempt, device = self.device
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let recorder = Self.openRecorder(device: device) { v in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.level = v
+                    self.lastBufferAt = Date()
+                    if self.heardAt == nil { self.heardAt = self.lastBufferAt }
+                }
+            }
+            DispatchQueue.main.async {
+                guard let recorder else { return }
+                guard let self, attempt == self.micAttempt else { return Self.close(recorder) }
+                self.recorder = recorder
+            }
         }
     }
 
     private func stopMic() {
-        micQueue.async { [weak self] in
-            guard let engine = self?.engine else { return }
-            engine.inputNode.removeTap(onBus: 0)
-            engine.stop()
-            self?.engine = nil
+        micAttempt += 1
+        guard let recorder else { return }
+        self.recorder = nil
+        Self.close(recorder)
+    }
+
+    private static func close(_ recorder: AudioQueueRef) {
+        DispatchQueue.global(qos: .utility).async {
+            AudioQueueStop(recorder, true)
+            AudioQueueDispose(recorder, true)
         }
     }
 
-    // micQueue
-    private func startEngine(device: AudioDeviceID?) {
-        let engine = AVAudioEngine()
-        self.engine = engine
-        let input = engine.inputNode
-        // bound to the device itself: an engine on the default input stops dead (no buffers) when the default
-        // moves to the built-in mic right under it, and the badge would sit gray and still
-        if var id = device, let unit = input.audioUnit {
-            AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
-                                 &id, UInt32(MemoryLayout<AudioDeviceID>.size))
-        }
-        let format = input.inputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else { log("mic: the input has no format yet"); return }
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buf, _ in
-            guard let ch = buf.floatChannelData?[0] else { return }
-            let n = Int(buf.frameLength)
+    // off the main thread: may block while Core Audio is busy
+    private static func openRecorder(device: AudioDeviceID?, onLevel: @escaping (CGFloat) -> Void) -> AudioQueueRef? {
+        var format = AudioStreamBasicDescription(
+            mSampleRate: 16000, mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked,
+            mBytesPerPacket: 2, mFramesPerPacket: 1, mBytesPerFrame: 2, mChannelsPerFrame: 1, mBitsPerChannel: 16, mReserved: 0)
+        var queue: AudioQueueRef?
+        let status = AudioQueueNewInputWithDispatchQueue(&queue, &format, 0, levelQueue) { q, buffer, _, _, _ in
+            let n = Int(buffer.pointee.mAudioDataByteSize) / 2
+            let samples = buffer.pointee.mAudioData.assumingMemoryBound(to: Int16.self)
             var sum: Float = 0
-            for i in 0..<n { sum += ch[i] * ch[i] }
-            let rms16 = sqrt(sum / Float(max(n, 1))) * 32768  // Claude measures 16-bit samples
-            let v = CGFloat(sqrt(min(rms16 / 2000, 1)))
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.level = v
-                self.lastBufferAt = Date()
-                if self.heardAt == nil { self.heardAt = self.lastBufferAt }
-            }
+            for i in 0..<n { let v = Float(samples[i]); sum += v * v }
+            AudioQueueEnqueueBuffer(q, buffer, 0, nil)
+            let rms16 = sqrt(sum / Float(max(n, 1)))  // Claude measures 16-bit samples, as these are
+            onLevel(CGFloat(sqrt(min(rms16 / 2000, 1))))
         }
-        do { try engine.start() } catch { log("mic: \(error)") }
+        guard status == noErr, let queue else { log("mic: AudioQueueNewInput failed (\(status))"); return nil }
+        // bound to the device itself: a recorder on the default input goes silent when the default moves to the
+        // built-in mic right under it
+        if let device, let uid = Mic.uid(device) {
+            var cfUID = uid as CFString
+            let set = withUnsafeMutablePointer(to: &cfUID) {
+                AudioQueueSetProperty(queue, kAudioQueueProperty_CurrentDevice, $0, UInt32(MemoryLayout<CFString>.size))
+            }
+            if set != noErr { log("mic: binding the recorder to \(uid) failed (\(set))") }
+        }
+        for _ in 0..<3 {
+            var buffer: AudioQueueBufferRef?
+            AudioQueueAllocateBuffer(queue, 1600, &buffer)  // 50 ms
+            if let buffer { AudioQueueEnqueueBuffer(queue, buffer, 0, nil) }
+        }
+        let started = AudioQueueStart(queue, nil)
+        guard started == noErr else {
+            log("mic: AudioQueueStart failed (\(started))")
+            AudioQueueDispose(queue, true)
+            return nil
+        }
+        return queue
     }
 
     func process() {
@@ -459,7 +491,8 @@ final class VoiceBadge: NSView {
             smoothed += (target - smoothed) * (target > smoothed ? 0.45 : 0.18)
             // the spin until the mic is heard (and at least introMin), then a crossfade into the live mic
             var intro: CGFloat = 1
-            if let heardAt {
+            let heard = heardAt ?? (now.timeIntervalSince(shownAt) > Self.introMax ? shownAt.addingTimeInterval(Self.introMax) : nil)
+            if let heardAt = heard {
                 let from = max(heardAt, shownAt.addingTimeInterval(Self.introMin))
                 intro = 1 - min(max(CGFloat(now.timeIntervalSince(from) / Self.introFade), 0), 1)
             }
@@ -586,7 +619,14 @@ final class Indicator {
 // Chrome and Electron build their accessibility tree (and so report the focused field) only when asked.
 func enableAppAccessibility() {
     guard let app = NSWorkspace.shared.frontmostApplication else { return }
-    AXUIElementSetAttributeValue(AXUIElementCreateApplication(app.processIdentifier), "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    let element = AXUIElementCreateApplication(app.processIdentifier)
+    AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    // Chromium 15x ignores that one and switches its web content off again when unused; the flag VoiceOver sets on
+    // every app turns it on. Only for an app that can't tell its focused element, the flag costs apps some speed.
+    var focused: CFTypeRef?
+    if AXUIElementCopyAttributeValue(element, kAXFocusedUIElementAttribute as CFString, &focused) != .success {
+        AXUIElementSetAttributeValue(element, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+    }
 }
 
 // MARK: - Typing into the focused field
@@ -644,13 +684,16 @@ func role(of element: AXUIElement?) -> String {
 // screen. A hidden window keeps its app and field focused (iTerm's hotkey window once it slides away, minimized windows),
 // and Show Desktop slides the windows off the edges: text typed there would land out of sight. An element that reports
 // no frame counts as visible when its app shows any window.
+func visibleWindows(of pid: pid_t) -> [CGRect] {
+    (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? [])
+        .filter { ($0[kCGWindowOwnerPID as String] as? pid_t) == pid }
+        .compactMap { ($0[kCGWindowBounds as String] as! CFDictionary?).flatMap { CGRect(dictionaryRepresentation: $0) } }
+}
+
 func onScreen(_ element: AXUIElement) -> Bool {
     var pid: pid_t = 0
     AXUIElementGetPid(element, &pid)
-    let windows = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
-        as? [[String: Any]] ?? [])
-        .filter { ($0[kCGWindowOwnerPID as String] as? pid_t) == pid }
-        .compactMap { ($0[kCGWindowBounds as String] as! CFDictionary?).flatMap { CGRect(dictionaryRepresentation: $0) } }
+    let windows = visibleWindows(of: pid)
     var pos: CFTypeRef?, size: CFTypeRef?
     guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &pos) == .success,
           AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &size) == .success,
@@ -663,6 +706,17 @@ func onScreen(_ element: AXUIElement) -> Bool {
     let primary = NSScreen.screens.first?.frame.height ?? 0
     return windows.contains { $0.contains(center) }
         && NSScreen.screens.contains { $0.frame.contains(CGPoint(x: center.x, y: primary - center.y)) }
+}
+
+// Where the text goes. Like any dictation app it is typed into whatever has focus; only when macOS says for sure that
+// nothing there takes text (the desktop, a page with no field active, a hidden window, an app with no window in
+// sight) does it go to the clipboard instead. An app that tells nothing about its focus gets the text typed.
+enum Focus { case field, noField, unknown }
+
+func focusState(_ element: AXUIElement?) -> Focus {
+    if let element { return focusedTakesText(element) ? .field : .noField }
+    guard let app = NSWorkspace.shared.frontmostApplication else { return .noField }
+    return visibleWindows(of: app.processIdentifier).isEmpty ? .noField : .unknown
 }
 
 func focusedTakesText(_ element: AXUIElement?) -> Bool {
@@ -732,8 +786,9 @@ final class Dictation {
         guard phase == .arming else { return }
         enableAppAccessibility()  // Chrome and Electron only report their fields once asked
         let field = focusedElement()
-        let takesText = focusedTakesText(field)
-        if takesText { log("typing into \(role(of: field)) in \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?")") }
+        let focus = focusState(field)
+        let takesText = focus != .noField
+        if takesText { log("typing into \(focus == .unknown ? "an unreported field" : role(of: field)) in \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?")") }
         phase = .holding
         cancelled = false
         // without a field the recording starts all the same, so no word is lost: the text waits for a field that
@@ -742,7 +797,7 @@ final class Dictation {
         searchUntil = takesText ? nil : Date().addingTimeInterval(0.5)
         continuing = false
         typed = []
-        target = takesText ? field : nil
+        target = focus == .field ? field : nil
         Mic.useBuiltIn()
         indicator.show()
         indicator.badge.listen(device: Mic.builtIn)
