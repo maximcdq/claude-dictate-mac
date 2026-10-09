@@ -5,8 +5,10 @@ import AppKit
 enum Palette {
     // nothing came of the dictation: a soft coral, not an alarm red
     static let nothing = NSColor(srgbRed: 1.0, green: 0.5, blue: 0.47, alpha: 1)
-    // the text is in: a soft green, as soft as the coral
-    static let typed = NSColor(srgbRed: 0.42, green: 0.86, blue: 0.56, alpha: 1)
+    // the notch's ending glow: green when the text is in, a coral red when nothing came; a touch deeper than the
+    // badge's coral, as a glow round black reads paler than a fill
+    static let typed = NSColor(srgbRed: 0.30, green: 0.85, blue: 0.45, alpha: 1)
+    static let missed = NSColor(srgbRed: 1.0, green: 0.32, blue: 0.30, alpha: 1)
 
     private static let stops: [(CGFloat, CGFloat, CGFloat)] = [
         (0.35, 0.78, 0.98),  // sky blue

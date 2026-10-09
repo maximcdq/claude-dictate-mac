@@ -76,6 +76,7 @@ final class NotchDrips {
 
     static let maxDrips = 9
     static let leave: TimeInterval = 0.45  // the drips draw back into the notch, the glow and the icon fade
+    static let ending = (swell: 0.4, fade: 1.2)  // the green or coral: swells into the color, then breathes out
 
     private let meter: LevelSource
     private let look: () -> NotchLook
@@ -88,6 +89,7 @@ final class NotchDrips {
     private var lastFrame = Date()
     private var startedAt = Date()  // hue clock
     private var modeAt = Date()
+    private var shineAt: CGFloat = 0  // the glow as the mode changed: the ending swells on from there
     private var leavingAt: Date?
 
     init(meter: LevelSource, look: @escaping () -> NotchLook) {
@@ -111,6 +113,7 @@ final class NotchDrips {
         guard self.mode != .off else { return }
         self.mode = mode
         modeAt = Date()
+        shineAt = shine
         meter.stop()
     }
 
@@ -157,8 +160,9 @@ final class NotchDrips {
 
         // the glow: the badge's color. As the key goes down it flares up at once and settles, as Siri does, to a
         // faint glow that waits for the voice and brightens with it (the mic's first moments of noise hide under the
-        // flare). At the end it turns soft green when the text is typed, soft coral when nothing came, and fades out
-        // smoothly from there; with the text in the clipboard it just dims, the copy icon tells.
+        // flare). At the end it swells into green when the text is typed, coral red when nothing came, and breathes
+        // out, all in one eased curve from wherever the glow was; with the text in the clipboard it just dims, the
+        // copy icon tells.
         let hue = Palette.color(at: CGFloat(now.timeIntervalSince(startedAt)))
         var color = hue
         let live = CGFloat(now.timeIntervalSince(startedAt))
@@ -169,10 +173,18 @@ final class NotchDrips {
         case .live: rest = 0.25 + 0.75 * speech * Easing.smoothstep(min(max((live - 0.25) / 0.3, 0), 1))
         case .processing, .copied: rest = 0.25
         case .typed, .empty:
-            color = hue.blended(withFraction: Easing.smoothstep(min(since / 0.15, 1)), of: mode == .typed ? Palette.typed : Palette.nothing)!
-            rest = 0.85 * exp(-max(since - 0.35, 0) / 0.7)
+            // the color turns ahead of the swell, so the muddy middle between the voice's hue and the green passes dim
+            let tint = Easing.smoothstep(min(since / (Self.ending.swell * 0.5), 1))
+            color = hue.blended(withFraction: tint, of: mode == .typed ? Palette.typed : Palette.missed)!
+            let swell = Easing.smoothstep(min(since / Self.ending.swell, 1))
+            let fade = Easing.smoothstep(min(max((since - Self.ending.swell) / Self.ending.fade, 0), 1))
+            rest = (shineAt + (0.8 - shineAt) * swell) * (1 - fade)
         }
-        shine += (rest - shine) * (1 - exp(-dt * (rest > shine ? 14 : 5)))
+        if mode == .typed || mode == .empty {
+            shine = rest  // already eased
+        } else {
+            shine += (rest - shine) * (1 - exp(-dt * (rest > shine ? 14 : 5)))
+        }
         var glow = max(flare, shine)
         glow *= (1 - leaving) * min(look.glow * 1.4, 1)
         let rgb = color.usingColorSpace(.sRGB) ?? color
@@ -529,7 +541,7 @@ public final class NotchIndicator {
             }
             withAnimation(.spring(duration: 0.55, bounce: 0.3)) { result.symbol = "doc.on.clipboard" }
         }
-        hide(after: outcome == .copied ? 1.2 : 1.1)
+        hide(after: outcome == .copied ? 1.2 : NotchDrips.ending.swell + NotchDrips.ending.fade)
     }
 
     private func hide(after delay: TimeInterval) {
