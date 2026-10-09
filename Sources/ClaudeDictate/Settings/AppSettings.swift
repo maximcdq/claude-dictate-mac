@@ -16,9 +16,9 @@ extension Setting {
     static var dripCount: Setting<Double> { .init("dripCount", default: 5) }
     static var dripBlend: Setting<Double> { .init("dripBlend", default: 0.5) }
     static var dripGlow: Setting<Double> { .init("dripGlow", default: 0.5) }
-    // the result icon beside the notch: on Liquid Glass or bare, on the notch's right or left
+    // the result icon by the notch: on Liquid Glass or bare, on the notch's right or left or below it
     static var resultGlass: Setting<Bool> { .init("resultGlass", default: true) }
-    static var resultSide: Setting<ResultSide> { .init("resultSide", default: .right) }
+    static var resultPlace: Setting<NotchResultPlace> { .init("resultSide", default: .right) }
     // a BCP 47 code passed to the hidden session as Claude Code's `language`; empty follows the user's own setting
     static var language: Setting<String> { .init("language", default: "") }
     // record with the Mac's own mic while dictating, so AirPods stay in their high-quality mode
@@ -30,16 +30,11 @@ extension Setting {
     static var keepInDock: Setting<Bool> { .init("keepInDock", default: false) }
 }
 
-enum ResultSide: String, CaseIterable, Identifiable {
-    case left, right
-    var id: String { rawValue }
-}
-
 extension SettingsStore {
     var notchLook: NotchLook {
         NotchLook(drips: self[.drips], length: self[.dripLength], width: self[.dripWidth],
                   count: Int(self[.dripCount].rounded()), blend: self[.dripBlend], glow: self[.dripGlow],
-                  glass: self[.resultGlass], resultOnLeft: self[.resultSide] == .left)
+                  glass: self[.resultGlass], result: self[.resultPlace])
     }
 }
 

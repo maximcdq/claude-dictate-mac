@@ -31,9 +31,8 @@ struct IndicatorPane: View {
                     }
                     .disabled(!settings[.drips])
                     Slider(value: settings.binding(.dripGlow), in: 0...1) { Text("Glow") }
-                    Picker("Result", selection: settings.binding(.resultSide)) {
-                        Text("Left of the notch").tag(ResultSide.left)
-                        Text("Right of the notch").tag(ResultSide.right)
+                    Picker("Result", selection: settings.binding(.resultPlace)) {
+                        ForEach(NotchResultPlace.allCases) { Text($0.title).tag($0) }
                     }
                     Toggle("Liquid Glass behind the result", isOn: settings.binding(.resultGlass))
                     Button("Preview") { NotchPreview.play(settings) }
