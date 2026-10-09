@@ -5,6 +5,8 @@ import AppKit
 enum Palette {
     // nothing came of the dictation: a soft coral, not an alarm red
     static let nothing = NSColor(srgbRed: 1.0, green: 0.5, blue: 0.47, alpha: 1)
+    // the text is in: a soft green, as soft as the coral
+    static let typed = NSColor(srgbRed: 0.42, green: 0.86, blue: 0.56, alpha: 1)
 
     private static let stops: [(CGFloat, CGFloat, CGFloat)] = [
         (0.35, 0.78, 0.98),  // sky blue

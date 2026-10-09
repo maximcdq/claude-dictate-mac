@@ -5,8 +5,9 @@ import SwiftUI
 
 // MARK: - Notch drips: black liquid seeping from the MacBook's notch while recording
 // A few small drips hang from the notch's lower edge and lengthen with the voice; a glow in the badge's colors runs
-// round the notch and the drips, faint in silence, brighter with the voice. When the text lands, a check (typed) or a
-// copy icon (in the clipboard) draws itself in the menu bar beside the notch, then everything fades back.
+// round the notch and the drips, faint in silence, brighter with the voice. At the end the glow turns soft green (the
+// text is typed) or soft coral (nothing came) and fades out; text in the clipboard brings out a copy icon by the
+// notch instead.
 // It is one signed distance field drawn by a Metal shader on every display refresh (120 Hz on ProMotion): the notch,
 // the drips are smooth-unioned, so they merge like liquid, with crisp antialiased edges at any size.
 // The notch itself is hardware: the black drawn inside it doesn't show, the drips seem to come out of it.
@@ -156,7 +157,8 @@ final class NotchDrips {
 
         // the glow: the badge's color. As the key goes down it flares up at once and settles, as Siri does, to a
         // faint glow that waits for the voice and brightens with it (the mic's first moments of noise hide under the
-        // flare). At the end it just dims and fades out; when nothing came it turns soft coral first, as the badge does.
+        // flare). At the end it turns soft green when the text is typed, soft coral when nothing came, and fades out
+        // smoothly from there; with the text in the clipboard it just dims, the copy icon tells.
         let hue = Palette.color(at: CGFloat(now.timeIntervalSince(startedAt)))
         var color = hue
         let live = CGFloat(now.timeIntervalSince(startedAt))
@@ -165,10 +167,10 @@ final class NotchDrips {
         switch mode {
         case .off: rest = 0
         case .live: rest = 0.25 + 0.75 * speech * Easing.smoothstep(min(max((live - 0.25) / 0.3, 0), 1))
-        case .processing, .typed, .copied: rest = 0.25
-        case .empty:
-            color = hue.blended(withFraction: Easing.smoothstep(min(since / 0.25, 1)), of: Palette.nothing)!
-            rest = 0.8
+        case .processing, .copied: rest = 0.25
+        case .typed, .empty:
+            color = hue.blended(withFraction: Easing.smoothstep(min(since / 0.15, 1)), of: mode == .typed ? Palette.typed : Palette.nothing)!
+            rest = 0.85 * exp(-max(since - 0.35, 0) / 0.7)
         }
         shine += (rest - shine) * (1 - exp(-dt * (rest > shine ? 14 : 5)))
         var glow = max(flare, shine)
@@ -496,15 +498,15 @@ public final class NotchIndicator {
         if drips.mode == .live { drips.set(.processing) }
     }
 
-    // the text landed in the field (a check) or in the clipboard (a clipboard) beside the notch, or nothing came
-    // (the glow turns soft coral); then the drips draw back in and it all fades
+    // the text landed in the field (the glow turns soft green) or in the clipboard (a clipboard icon by the notch),
+    // or nothing came (soft coral); then the drips draw back in and it all fades
     public func done(_ outcome: Outcome) {
         switch outcome {
         case .typed: drips.set(.typed)
         case .copied: drips.set(.copied)
         case .empty: drips.set(.empty)
         }
-        if outcome != .empty {
+        if outcome == .copied {
             let look = look(), notch = drips.notch
             result.glass = look.glass
             result.place = look.result
@@ -525,9 +527,9 @@ public final class NotchIndicator {
                 $0.bestMatch(from: [.aqua, .darkAqua, .vibrantLight, .vibrantDark]).map { [.darkAqua, .vibrantDark].contains($0) } ?? true
             }
             }
-            withAnimation(.spring(duration: 0.55, bounce: 0.3)) { result.symbol = outcome == .typed ? "checkmark" : "doc.on.clipboard" }
+            withAnimation(.spring(duration: 0.55, bounce: 0.3)) { result.symbol = "doc.on.clipboard" }
         }
-        hide(after: outcome == .empty ? 0.7 : outcome == .copied ? 1.2 : 1.0)
+        hide(after: outcome == .copied ? 1.2 : 1.1)
     }
 
     private func hide(after delay: TimeInterval) {

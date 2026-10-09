@@ -9,9 +9,9 @@ key and it settles on the final transcript.
 - No time limit while the key is held: Claude Code stops a recording after 2 minutes or 15 s of silence; ClaudeDictate
   picks up right after and keeps appending to the same text.
 - Three indicators, picked in Settings: the notch (the default) glowing with your voice, optionally with small black
-  drips, ending with a check or a clipboard on Liquid Glass under the notch (or beside it); a Liquid Glass badge next
-  to the pointer that reacts to your voice and ends with a check, a copy icon or a soft coral spin; or Claude Code's own
-  `/voice` bar right of the text caret.
+  drips, glowing green at the end when the text is typed, coral when nothing came, with a clipboard on Liquid Glass
+  when the text went to the clipboard; a Liquid Glass badge next to the pointer that reacts to your voice and ends
+  with a check, a copy icon or a soft coral spin; or Claude Code's own `/voice` bar right of the text caret.
 - No text field? Speak anyway: the text lands in the clipboard.
 - **Esc** cancels and erases what this dictation typed.
 - Settings (menu bar icon → Settings…, or open the app again): the key, start at login, the Dock, dictation language,
