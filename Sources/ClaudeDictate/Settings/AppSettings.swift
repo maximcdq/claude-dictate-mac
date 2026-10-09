@@ -6,6 +6,10 @@ import DictateCore
 extension Setting {
     static var hotkey: Setting<Hotkey> { .init("hotkey", default: .fn) }
     static var indicator: Setting<IndicatorStyle> { .init("indicator", default: .badge) }
+    // the notch drips: their size (1 small, up to 2), the glow's strength 0...1, how many
+    static var dripSize: Setting<Double> { .init("dripSize", default: 1) }
+    static var dripGlow: Setting<Double> { .init("dripGlow", default: 0.7) }
+    static var dripCount: Setting<Double> { .init("dripCount", default: 5) }
     // a BCP 47 code passed to the hidden session as Claude Code's `language`; empty follows the user's own setting
     static var language: Setting<String> { .init("language", default: "") }
     // record with the Mac's own mic while dictating, so AirPods stay in their high-quality mode
@@ -13,6 +17,12 @@ extension Setting {
     // pause music and videos while dictating, play them on afterwards
     static var pauseMedia: Setting<Bool> { .init("pauseMedia", default: true) }
     static var autoUpdate: Setting<Bool> { .init("autoUpdate", default: true) }
+}
+
+extension SettingsStore {
+    var notchLook: NotchLook {
+        NotchLook(size: self[.dripSize], glow: self[.dripGlow], drips: Int(self[.dripCount].rounded()))
+    }
 }
 
 // Claude Code /voice's dictation languages (code.claude.com/docs/en/voice-dictation#change-the-dictation-language)

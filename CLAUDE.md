@@ -22,7 +22,7 @@ dependencies. Owner: maximcdq. Other people contribute through pull requests.
 | Module | What |
 |--------|------|
 | `Sources/DictateCore` | paths, log, `Version`, `Hotkey` model, the settings store (`Setting`, `SettingsStore`); no UI |
-| `Sources/DictateAnimations` | the indicators: `VoiceBadge`/`BadgeIndicator` (glass badge at the pointer), `CaretBar`/`CaretIndicator` (Claude Code's bar at the caret), `Easing`, `Palette`; mic level comes in through `LevelSource` |
+| `Sources/DictateAnimations` | the indicators: `VoiceBadge`/`BadgeIndicator` (glass badge at the pointer), `CaretBar`/`CaretIndicator` (Claude Code's bar at the caret), `NotchDrips`/`NotchIndicator` (drips from the notch), `Easing`, `Palette`; mic level comes in through `LevelSource` |
 | `Sources/DictateUpdater` | self-update from GitHub releases: download, SHA-256 check, re-sign with the local identity, swap the bundle |
 | `Sources/ClaudeDictate` | the app: `Claude/` hidden session in a pty, `Audio/` mic switching and level meter, `Input/` hotkey event tap and synthetic typing, `Accessibility/` focus and caret lookup, `Dictation/` the state machine, `Settings/` keys and the settings window, `System/` login item and relaunch, `App/` menu bar |
 | `mod/` | the Claude Code plugin inside the hidden session; shipped in the app bundle, copied to `~/Library/Application Support/ClaudeDictate/mod` at launch |
@@ -31,7 +31,7 @@ dependencies. Owner: maximcdq. Other people contribute through pull requests.
 ## Adding a setting
 
 1. Declare it in `Sources/ClaudeDictate/Settings/AppSettings.swift`:
-   `static var name: Setting<Type> { .init("name", default: …) }` (Bool, String or a String-backed enum).
+   `static var name: Setting<Type> { .init("name", default: …) }` (Bool, Double, String or a String-backed enum).
 2. Show it in a pane under `Settings/Panes/` with `settings.binding(.name)`; a new pane goes into
    `SettingsWindow.panes`.
 3. Use it: read `settings[.name]` where needed, or `settings.observe(.name) { … }` to react to a change.

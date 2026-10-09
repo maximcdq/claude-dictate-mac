@@ -8,8 +8,9 @@ key and it settles on the final transcript.
 - Live: words appear while you speak and get corrected in place to the final transcript.
 - No time limit while the key is held: Claude Code stops a recording after 2 minutes or 15 s of silence; ClaudeDictate
   picks up right after and keeps appending to the same text.
-- Two indicators, picked in Settings: a Liquid Glass badge next to the pointer that reacts to your voice
-  and ends with a check, a copy icon or a soft coral spin; or Claude Code's own `/voice` bar right of the text caret.
+- Three indicators, picked in Settings: a Liquid Glass badge next to the pointer that reacts to your voice
+  and ends with a check, a copy icon or a soft coral spin; Claude Code's own `/voice` bar right of the text caret; or
+  small black drips seeping from the MacBook's notch, glowing with your voice (size, glow and count adjustable).
 - No text field? Speak anyway: the text lands in the clipboard.
 - **Esc** cancels and erases what this dictation typed.
 - Settings (menu bar icon → Settings…): the key, start at login, dictation language, built-in mic, indicator,
@@ -87,7 +88,7 @@ it alone starts a dictation.
 | Path | What |
 |------|------|
 | `Sources/ClaudeDictate` | the app: hotkey event tap, hidden pty, typing, settings, menu bar |
-| `Sources/DictateAnimations` | the indicators: badge at the pointer, bar at the caret |
+| `Sources/DictateAnimations` | the indicators: badge at the pointer, bar at the caret, drips from the notch |
 | `Sources/DictateUpdater` | self-update from GitHub releases |
 | `Sources/DictateCore` | paths, log, versions, hotkey model, settings store |
 | `mod/` | Claude Code plugin running inside the hidden session (shipped in the app bundle) |
