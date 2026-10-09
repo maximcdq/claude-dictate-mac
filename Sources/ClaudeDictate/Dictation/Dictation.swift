@@ -101,6 +101,7 @@ final class Dictation {
         target = focus == .field ? field : nil
         beganAt = Date()
         if settings[.builtInMic] { Mic.useBuiltIn() }
+        if settings[.pauseMedia] { NowPlaying.pauseIfPlaying() }
         style = settings[.indicator]
         switch style {
         case .badge:
@@ -260,6 +261,7 @@ final class Dictation {
         try? "clear".write(toFile: Paths.control, atomically: true, encoding: .utf8)
         phase = .idle
         Mic.restore()
+        NowPlaying.resume()
         if restartPending { restartClaude() }
         log("done: \(text.count) chars\(cancelled ? ", cancelled" : "")\(detached ? (target == nil ? ", to the clipboard" : ", focus moved, to the clipboard") : "")")
         // the clipboard only when the text did not land in a field: typed text leaves it alone

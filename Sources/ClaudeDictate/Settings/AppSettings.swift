@@ -10,6 +10,8 @@ extension Setting {
     static var language: Setting<String> { .init("language", default: "") }
     // record with the Mac's own mic while dictating, so AirPods stay in their high-quality mode
     static var builtInMic: Setting<Bool> { .init("builtInMic", default: true) }
+    // pause music and videos while dictating, play them on afterwards
+    static var pauseMedia: Setting<Bool> { .init("pauseMedia", default: true) }
     static var autoUpdate: Setting<Bool> { .init("autoUpdate", default: true) }
 }
 
