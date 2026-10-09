@@ -348,16 +348,16 @@ private final class NotchView: NSView {
     }
 }
 
-// The result in the menu bar beside the notch: the system's check or clipboard symbol in the menu bar's own color
+// The result under the notch or beside it: the system's check or clipboard symbol in the menu bar's own color
 // (dark on a light menu bar, white on a dark one), on a Liquid Glass capsule or bare. It springs out of the notch's
 // side, sharpening out of a blur as the check draws itself, and melts back into a blur.
 final class NotchResult: ObservableObject {
     @Published var symbol: String?
     var glass = true
     var place = NotchResultPlace.right
-    // the menu bar's text is white or black with the wallpaper; nil under the notch, over the windows: the system's.
-    // Set outright: Liquid Glass would otherwise pick its own by what's behind it, black over a light wallpaper
-    // under a white menu bar
+    // the menu bar's text is white or black with the wallpaper, and the result takes it, under the notch too (nil:
+    // not known, the system's). Set outright: Liquid Glass would otherwise pick its own by what's behind it, black
+    // over a light wallpaper or window under a white menu bar
     var dark: Bool?
 }
 
@@ -490,8 +490,8 @@ public final class NotchIndicator {
             let look = look(), notch = drips.notch
             result.glass = look.glass
             result.place = look.result
-            // the capsule 16 pt off the notch's side in the menu bar, in the menu bar's colors, or 8 pt under its
-            // middle over the windows, in the system's; in a view with room round it for the glass's rim and the spring
+            // the capsule 16 pt off the notch's side in the menu bar, or 8 pt under its middle over the windows, in the
+            // menu bar's colors; in a view with room round it for the glass's rim and the spring
             let size = Self.resultSize, w = size.width + 24, h = size.height + 24
             let half = size.width / 2
             switch look.result {
@@ -499,7 +499,7 @@ public final class NotchIndicator {
             case .right: resultView.frame = NSRect(x: notch.maxX + 16 + half - w / 2, y: Self.below, width: w, height: notch.height)
             case .below: resultView.frame = NSRect(x: notch.midX - w / 2, y: Self.below - 8 - size.height / 2 - h / 2, width: w, height: h)
             }
-            let bar = look.result == .below ? nil : menuBarAppearance()
+            let bar = menuBarAppearance()
             resultView.appearance = bar
             result.dark = bar.map { $0.bestMatch(from: [.aqua, .darkAqua, .vibrantLight, .vibrantDark]).map { [.darkAqua, .vibrantDark].contains($0) } ?? true }
             withAnimation(.spring(duration: 0.55, bounce: 0.3)) { result.symbol = outcome == .typed ? "checkmark" : "doc.on.clipboard" }

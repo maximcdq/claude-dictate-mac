@@ -18,7 +18,7 @@ extension Setting {
     static var dripGlow: Setting<Double> { .init("dripGlow", default: 0.5) }
     // the result icon by the notch: on Liquid Glass or bare, on the notch's right or left or below it
     static var resultGlass: Setting<Bool> { .init("resultGlass", default: true) }
-    static var resultPlace: Setting<NotchResultPlace> { .init("resultSide", default: .right) }
+    static var resultPlace: Setting<NotchResultPlace> { .init("resultSide", default: .below) }
     // a BCP 47 code passed to the hidden session as Claude Code's `language`; empty follows the user's own setting
     static var language: Setting<String> { .init("language", default: "") }
     // record with the Mac's own mic while dictating, so AirPods stay in their high-quality mode
