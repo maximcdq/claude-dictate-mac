@@ -11,7 +11,7 @@ func relaunch(cleanup: () -> Void) {
     }
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/bin/sh")
-    p.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", Bundle.main.bundlePath]
+    p.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\" --args --relaunched", Bundle.main.bundlePath]  // no Settings popping up
     try? p.run()
     log("restarting through open")
     exit(0)

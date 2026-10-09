@@ -30,6 +30,12 @@ extension Setting where Value == String {
     }
 }
 
+extension Setting where Value == Double {
+    public init(_ key: String, default defaultValue: Double) {
+        self.init(key, default: defaultValue, decode: { $0 as? Double }, encode: { $0 })
+    }
+}
+
 extension Setting where Value: RawRepresentable, Value.RawValue == String {
     public init(_ key: String, default defaultValue: Value) {
         self.init(key, default: defaultValue, decode: { ($0 as? String).flatMap(Value.init(rawValue:)) }, encode: { $0.rawValue })

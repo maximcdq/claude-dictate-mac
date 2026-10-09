@@ -10,6 +10,7 @@ final class Dictation {
     let pty = ClaudePty()
     let indicator: BadgeIndicator
     let caret: CaretIndicator
+    let notch: NotchIndicator
     var style = IndicatorStyle.badge  // picked as a dictation begins
     var held = false  // the hotkey is down
     var beganAt = Date()
@@ -45,6 +46,8 @@ final class Dictation {
         let input = { settings[.builtInMic] ? Mic.builtIn : nil }
         indicator = BadgeIndicator(meter: LevelMeter(input: input))
         caret = CaretIndicator(meter: LevelMeter(input: input), caretRect: caretRect)
+        notch = NotchIndicator(meter: LevelMeter(input: input)) { settings.notchLook }
+        notch.menuBarAppearance = { StatusMenu.menuBarAppearance }
         pty.language = { settings[.language] }
         settings.observe(.language) { [weak self] _ in self?.restartClaude() }
     }
@@ -103,6 +106,10 @@ final class Dictation {
         if settings[.builtInMic] { Mic.useBuiltIn() }
         if settings[.pauseMedia] { NowPlaying.pauseIfPlaying() }
         style = settings[.indicator]
+        if style == .notch, !notch.show() {
+            style = .badge
+            log("notch indicator unavailable (no notch on the pointer's screen, or no Metal): the badge instead")
+        }
         switch style {
         case .badge:
             indicator.show()
@@ -110,6 +117,8 @@ final class Dictation {
         case .caret:
             caret.show()
             caret.bar.listen()
+        case .notch:
+            break  // shown above
         }
         startSpaces()
     }
@@ -177,7 +186,11 @@ final class Dictation {
         continuing = false
         searchUntil = nil
         stopSpaces()
-        style == .badge ? indicator.badge.process() : caret.bar.process()
+        switch style {
+        case .badge: indicator.badge.process()
+        case .caret: caret.bar.process()
+        case .notch: notch.process()
+        }
         phase = .finishing
         releasedAt = Date()
     }
@@ -271,6 +284,7 @@ final class Dictation {
             pb.setString(text, forType: .string)
         }
         if style == .caret { return caret.hide() }
+        if style == .notch { return cancelled ? notch.hide() : notch.done(text.isEmpty ? .empty : detached ? .copied : .typed) }
         if cancelled { return indicator.hide() }
         if text.isEmpty {
             indicator.badge.empty()

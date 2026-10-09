@@ -24,8 +24,12 @@ private enum Style: String { case a, b }
     let store = SettingsStore(defaults: defaults)
     let style = Setting<Style>("style", default: .a)
     let flag = Setting<Bool>("flag", default: true)
+    let size = Setting<Double>("size", default: 1)
     #expect(store[style] == .a)
     #expect(store[flag])
+    #expect(store[size] == 1)
+    store[size] = 1.5
+    #expect(store[size] == 1.5)
     var seen: Style?
     store.observe(style) { seen = $0 }
     store[style] = .b

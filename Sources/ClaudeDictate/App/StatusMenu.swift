@@ -10,6 +10,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private let openSettings: () -> Void
     private let checkForUpdates: () -> Void
 
+    // the menu bar's appearance, light or dark with the wallpaper under it, as its items get it (the app's own
+    // appearance otherwise, e.g. with the item hidden)
+    private static weak var current: StatusMenu?
+    static var menuBarAppearance: NSAppearance? { current?.item.button?.effectiveAppearance }
+
     init(settings: SettingsStore, openSettings: @escaping () -> Void, checkForUpdates: @escaping () -> Void) {
         self.settings = settings
         self.openSettings = openSettings
@@ -25,6 +30,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit ClaudeDictate", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         item.menu = menu
+        Self.current = self
     }
 
     private func action(_ title: String, _ selector: Selector, key: String = "") -> NSMenuItem {
