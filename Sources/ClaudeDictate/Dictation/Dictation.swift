@@ -47,6 +47,7 @@ final class Dictation {
         indicator = BadgeIndicator(meter: LevelMeter(input: input))
         caret = CaretIndicator(meter: LevelMeter(input: input), caretRect: caretRect)
         notch = NotchIndicator(meter: LevelMeter(input: input)) { settings.notchLook }
+        notch.menuBarAppearance = { StatusMenu.menuBarAppearance }
         pty.language = { settings[.language] }
         settings.observe(.language) { [weak self] _ in self?.restartClaude() }
     }

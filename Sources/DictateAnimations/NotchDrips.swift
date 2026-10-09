@@ -1,18 +1,20 @@
 import AppKit
 import Metal
 import QuartzCore
+import SwiftUI
 
 // MARK: - Notch drips: black liquid seeping from the MacBook's notch while recording
 // A few small drips hang from the notch's lower edge and lengthen with the voice; a glow in the badge's colors runs
-// round the notch and the drips, faint in silence, brighter with the voice. When the text lands, a drop flows out of
-// the notch to the right with a white check (typed) or copy icon (in the clipboard) on it, then everything draws back.
+// round the notch and the drips, faint in silence, brighter with the voice. When the text lands, a check (typed) or a
+// copy icon (in the clipboard) draws itself in the menu bar beside the notch, then everything fades back.
 // It is one signed distance field drawn by a Metal shader on every display refresh (120 Hz on ProMotion): the notch,
-// the drips and the drop are smooth-unioned, so they merge like liquid, with crisp antialiased edges at any size.
+// the drips are smooth-unioned, so they merge like liquid, with crisp antialiased edges at any size.
 // The notch itself is hardware: the black drawn inside it doesn't show, the drips seem to come out of it.
 
 // How the drips look, from the settings, read every frame so the sliders show live: `drips` off leaves only the
 // glow; `length` and `width` scale the drips (1 is the default, small); `count` how many; `blend` 0...1 how much
-// they melt into each other and the notch; `glow` 0...1 the glow's strength and reach, 0 none.
+// they melt into each other and the notch; `glow` 0...1 the glow's strength and reach, 0 none; the result icon
+// sits on Liquid Glass (`glass`) and comes out of the notch's left or right side (`resultOnLeft`).
 public struct NotchLook {
     public var drips: Bool
     public var length: CGFloat
@@ -20,14 +22,19 @@ public struct NotchLook {
     public var count: Int
     public var blend: CGFloat
     public var glow: CGFloat
+    public var glass: Bool
+    public var resultOnLeft: Bool
 
-    public init(drips: Bool, length: CGFloat, width: CGFloat, count: Int, blend: CGFloat, glow: CGFloat) {
+    public init(drips: Bool, length: CGFloat, width: CGFloat, count: Int, blend: CGFloat, glow: CGFloat,
+                glass: Bool, resultOnLeft: Bool) {
         self.drips = drips
         self.length = length
         self.width = width
         self.count = count
         self.blend = blend
         self.glow = glow
+        self.glass = glass
+        self.resultOnLeft = resultOnLeft
     }
 }
 
@@ -35,7 +42,7 @@ final class NotchDrips {
     enum Mode { case off, live, processing, typed, copied, empty }
 
     static let maxDrips = 9
-    static let leave: TimeInterval = 0.45  // the drips and the drop draw back into the notch
+    static let leave: TimeInterval = 0.45  // the drips draw back into the notch, the glow and the icon fade
 
     private let meter: LevelSource
     private let look: () -> NotchLook
@@ -130,7 +137,7 @@ final class NotchDrips {
         glow *= (1 - leaving) * min(look.glow * 1.4, 1)
         let rgb = color.usingColorSpace(.sRGB) ?? color
 
-        var u = [Float](repeating: 0, count: 22 + 5 * Self.maxDrips)
+        var u = [Float](repeating: 0, count: 15 + 5 * Self.maxDrips)
         u[2] = Float(scale)
         (u[3], u[4], u[5], u[6]) = (Float(notch.minX), Float(notch.minY), Float(notch.maxX), Float(notch.maxY))
         (u[7], u[8], u[9]) = (Float(rgb.redComponent), Float(rgb.greenComponent), Float(rgb.blueComponent))
@@ -139,25 +146,9 @@ final class NotchDrips {
         u[12] = Float(2 + 6 * look.blend)  // the fillet where a drip leaves the notch
         u[13] = Float(0.5 + 9 * look.blend)  // how much neighboring drips melt together
 
-        // the drop with the result flows out of the notch's right side, springs into place and draws back in
-        if mode == .typed || mode == .copied {
-            // as big as the menu bar beside the notch allows, a little way out, a liquid neck back to the notch
-            let r = min(14, notch.height * 0.42)
-            let flowOut = Easing.pop(min(since / 0.4, 1)) * (1 - leaving)
-            u[14] = Float(notch.maxX - r - 4 + (2 * r + 12) * flowOut)
-            u[15] = Float(notch.midY)
-            u[16] = Float(r)
-            u[17] = Float(mode == .typed ? 1 : 2)
-            // the icon rides in from the notch's side: the check draws stroke by stroke, the copy's back sheet
-            // slides out from behind the front one
-            u[18] = Float(min(max((since - 0.15) / 0.3, 0), 1))
-            u[19] = Float(Easing.pop(min(max((since - 0.1) / 0.3, 0), 1)) * r / 10)
-            u[20] = Float(min(max((since - 0.1) / 0.1, 0), 1) * (1 - leaving))
-        }
-
         // spread over the notch's flat middle, each a little off its slot, breathing at its own pace
         let n = look.drips ? min(max(look.count, 1), Self.maxDrips) : 0
-        u[21] = Float(n)
+        u[14] = Float(n)
         for i in 0..<n {
             let seed = { Self.seed(i, $0) }
             let slot = n == 1 ? 0.5 : 0.2 + 0.6 * CGFloat(i) / CGFloat(n - 1)
@@ -166,7 +157,7 @@ final class NotchDrips {
             let wave = 0.5 + 0.3 * sin(flow * pace * 2 + seed(4) * 6.3) + 0.2 * sin(flow * pace * 3.3 + seed(6) * 6.3)
             let length = 22 * look.length * reach * (0.6 + 0.4 * seed(5)) * (0.35 + 0.65 * wave)
             let bulb = 2.4 * look.width * (0.75 + 0.5 * seed(3)) * (0.65 + 0.35 * reach)
-            let j = 22 + 5 * i
+            let j = 15 + 5 * i
             u[j] = Float(x)
             u[j + 1] = Float(notch.maxY - 4)  // the neck starts inside the notch
             u[j + 2] = Float(notch.maxY + length - bulb)  // the bulb's center: the tip hangs `length` below
@@ -199,9 +190,8 @@ final class NotchShader {
     }
 
     // Distances in points, top-left origin. u: [2] scale, [3...6] notch minX minY maxX maxY, [7...9] glow color,
-    // [10] glow strength, [11] glow reach, [12] notch fillet, [13] drip fillet, [14...16] result drop center x y and
-    // radius (0: none), [17] icon 1 check 2 copy, [18] icon progress, [19] icon scale, [20] icon alpha,
-    // [21] drip count, [22...] per drip: x, neck y, bulb y, neck radius, bulb radius.
+    // [10] glow strength, [11] glow reach, [12] notch fillet, [13] drip fillet, [14] drip count, [15...] per drip:
+    // x, neck y, bulb y, neck radius, bulb radius.
     static let source = """
     #include <metal_stdlib>
     using namespace metal;
@@ -237,12 +227,6 @@ final class NotchShader {
         return dot(p, float2(a, b)) - r1;
     }
 
-    static float segment(float2 p, float2 a, float2 b) {
-        float2 pa = p - a, ba = b - a;
-        float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0);
-        return length(pa - ba * h);
-    }
-
     fragment float4 notchFragment(VOut in [[stage_in]], constant float *u [[buffer(0)]]) {
         float scale = u[2];
         float2 p = in.position.xy / scale;
@@ -252,51 +236,18 @@ final class NotchShader {
         float2 lo = float2(notch.x + 3.0, -40.0), hi = float2(notch.z - 3.0, notch.w - 0.5);
         float d = roundedBox(p, (lo + hi) * 0.5, (hi - lo) * 0.5, min(9.0, (hi.x - lo.x) * 0.25));
 
-        int count = int(u[21]);
+        int count = int(u[14]);
         float drips = 1e5;
         for (int i = 0; i < count; i++) {
-            int j = 22 + 5 * i;
+            int j = 15 + 5 * i;
             float2 neck = float2(u[j], u[j + 1]);
             drips = smin(drips, unevenCapsule(p - neck, u[j + 3], u[j + 4], u[j + 2] - u[j + 1]), u[13]);
         }
         if (count > 0) d = smin(d, drips, u[12]);
 
-        float icon = 0.0;
-        float r = u[16];
-        if (r > 0.0) {
-            float2 c = float2(u[14], u[15]);
-            // the notch itself swells out to the right, nearly as tall as the drop, and rounds into it, with soft
-            // fillets where it leaves the notch
-            float2 from = float2(notch.z - 24.0, c.y);
-            float body = roundedBox(p, (from + c) * 0.5, float2(max(c.x - from.x, 0.0) * 0.5, r * 0.82), r * 0.82);
-            d = smin(d, smin(body, length(p - c) - r, 3.0), 5.0);
-            float s = max(u[19], 1e-3);
-            c.x -= 6.0 * (1.0 - smoothstep(0.0, 1.0, u[18]));
-            float stroke = 1e5;
-            if (u[17] < 1.5) {
-                // the badge's check, drawn from its left tip down and up to the right
-                float2 a = c + float2(-5.5, -0.5) * s, b = c + float2(-1.8, 3.5) * s, e = c + float2(5.5, -4.5) * s;
-                float l1 = length(b - a), l2 = length(e - b);
-                float drawn = (l1 + l2) * (1.0 - (1.0 - u[18]) * (1.0 - u[18]));
-                if (drawn > 0.0) {
-                    stroke = segment(p, a, a + (b - a) * min(drawn / l1, 1.0));
-                    if (drawn > l1) stroke = min(stroke, segment(p, b, b + (e - b) * min((drawn - l1) / l2, 1.0)));
-                    stroke -= 1.25 * s;
-                }
-            } else {
-                // two sheets, the back one sliding out up-right and showing only past the front one's edge
-                float slide = smoothstep(0.0, 1.0, u[18]);
-                float front = roundedBox(p, c + float2(-1.4, 1.4) * s, float2(3.4, 4.2) * s, 1.5 * s);
-                float back = roundedBox(p, c + float2(-1.4 + 2.8 * slide, 1.4 - 2.8 * slide) * s, float2(3.4, 4.2) * s, 1.5 * s);
-                stroke = abs(front) - 0.7 * s;
-                if (front > 1.4 * s) stroke = min(stroke, abs(back) - 0.7 * s);
-            }
-            icon = clamp(0.5 - stroke * scale, 0.0, 1.0) * u[20];
-        }
-
         float fill = clamp(0.5 - d * scale, 0.0, 1.0);
         float glow = u[10] * exp(-max(d, 0.0) / max(u[11], 0.01)) * (1.0 - fill);
-        float3 rgb = float3(u[7], u[8], u[9]) * glow + float3(icon * fill);
+        float3 rgb = float3(u[7], u[8], u[9]) * glow;
         return float4(rgb, fill + glow);
     }
     """
@@ -376,20 +327,74 @@ private final class NotchView: NSView {
     }
 }
 
+// The result in the menu bar beside the notch: the system's check or clipboard symbol in the menu bar's own color
+// (dark on a light menu bar, white on a dark one), on a Liquid Glass capsule or bare. It springs out of the notch's
+// side, sharpening out of a blur as the check draws itself, and melts back into a blur.
+final class NotchResult: ObservableObject {
+    @Published var symbol: String?
+    var glass = true
+    var onLeft = false
+}
+
+private struct NotchResultView: View {
+    @ObservedObject var result: NotchResult
+
+    var body: some View {
+        let notchSide: UnitPoint = result.onLeft ? .trailing : .leading
+        GlassEffectContainer {
+            ZStack {
+                if let symbol = result.symbol {
+                    NotchResultSymbol(name: symbol)
+                        .frame(width: NotchIndicator.resultSize.width, height: NotchIndicator.resultSize.height)
+                        .glassEffect(result.glass ? .regular : .identity, in: .capsule)
+                        .glassEffectTransition(.materialize)
+                        .transition(AnyTransition(.blurReplace)
+                            .combined(with: .scale(scale: 0.5, anchor: notchSide))
+                            .combined(with: .offset(x: result.onLeft ? 12 : -12)))
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// drawn on stroke by stroke once it's in (symbols without drawing data just appear)
+private struct NotchResultSymbol: View {
+    let name: String
+    @State private var drawn = false
+
+    var body: some View {
+        Image(systemName: name)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(.primary)
+            .symbolEffect(.drawOff, isActive: !drawn)
+            .onAppear { DispatchQueue.main.async { drawn = true } }
+    }
+}
+
 // The drips' window: borderless, click-through, over the menu bar around the notch. Only screens with a notch
 // can show it: the dictation falls back to the badge elsewhere.
 public final class NotchIndicator {
     public enum Outcome { case typed, copied, empty }
 
-    static let side: CGFloat = 60  // room beside the notch for the glow and the result drop
+    static let side: CGFloat = 70  // room beside the notch for the glow and the result
+    static let resultSize = CGSize(width: 40, height: 24)  // the glass capsule, within the menu bar's height
     static let below: CGFloat = 110  // room under it for the longest drips
     private let drips: NotchDrips
+    private let look: () -> NotchLook
     private let panel: NSPanel
     private var view: NotchView?
+    private let result = NotchResult()
+    private let resultView: NSHostingView<NotchResultView>
     private var generation = 0  // a show that comes while the previous hide still draws the drips in wins
+    // the menu bar's appearance, light or dark with the wallpaper under it (the app's menu bar item knows it)
+    public var menuBarAppearance: () -> NSAppearance? = { nil }
 
     public init(meter: LevelSource, look: @escaping () -> NotchLook) {
         drips = NotchDrips(meter: meter, look: look)
+        self.look = look
+        resultView = NSHostingView(rootView: NotchResultView(result: result))
+        resultView.sizingOptions = []
         _ = NotchShader.shared  // start compiling now, so the first dictation finds it ready
         panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.level = .statusBar
@@ -422,10 +427,14 @@ public final class NotchIndicator {
                            width: width + Self.side * 2, height: height + Self.below)
         panel.setFrame(frame, display: false)
         drips.notch = CGRect(x: Self.side, y: 0, width: width, height: height)
-        // the view lives only while shown
-        let view = NotchView(frame: NSRect(origin: .zero, size: frame.size), drips: drips)
+        // the views live only while shown; the result sits in the menu bar just right of the notch
+        let content = NSView(frame: NSRect(origin: .zero, size: frame.size))
+        let view = NotchView(frame: content.bounds, drips: drips)
         self.view = view
-        panel.contentView = view
+        content.addSubview(view)
+        result.symbol = nil
+        content.addSubview(resultView)
+        panel.contentView = content
         drips.listen()
         panel.orderFrontRegardless()
         view.start()
@@ -436,15 +445,26 @@ public final class NotchIndicator {
         if drips.mode == .live { drips.set(.processing) }
     }
 
-    // the text landed in the field (a check) or in the clipboard (a copy icon) on a drop flowing out to the right,
-    // or nothing came (soft coral); then the drips draw back in
+    // the text landed in the field (a check) or in the clipboard (a clipboard) beside the notch, or nothing came
+    // (soft coral); then the drips draw back in and it all fades
     public func done(_ outcome: Outcome) {
         switch outcome {
         case .typed: drips.set(.typed)
         case .copied: drips.set(.copied)
         case .empty: drips.set(.empty)
         }
-        hide(after: outcome == .empty ? 0.5 : outcome == .copied ? 0.9 : 0.8)
+        if outcome != .empty {
+            let look = look(), notch = drips.notch
+            result.glass = look.glass
+            result.onLeft = look.resultOnLeft
+            // the capsule 8 pt off the notch, in a view with room round it for the glass's rim and the spring
+            let w = Self.resultSize.width + 24
+            let center = look.resultOnLeft ? notch.minX - 8 - Self.resultSize.width / 2 : notch.maxX + 8 + Self.resultSize.width / 2
+            resultView.frame = NSRect(x: center - w / 2, y: Self.below, width: w, height: notch.height)
+            resultView.appearance = menuBarAppearance()
+            withAnimation(.spring(duration: 0.55, bounce: 0.3)) { result.symbol = outcome == .typed ? "checkmark" : "doc.on.clipboard" }
+        }
+        hide(after: outcome == .empty ? 0.5 : outcome == .copied ? 1.2 : 1.0)
     }
 
     private func hide(after delay: TimeInterval) {
@@ -458,6 +478,7 @@ public final class NotchIndicator {
     public func hide() {
         let shown = generation
         drips.leave()
+        withAnimation(.smooth(duration: NotchDrips.leave * 0.8)) { result.symbol = nil }
         DispatchQueue.main.asyncAfter(deadline: .now() + NotchDrips.leave) { [weak self] in
             guard let self, self.generation == shown else { return }
             self.view?.stop()

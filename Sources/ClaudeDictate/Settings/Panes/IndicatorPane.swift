@@ -31,12 +31,17 @@ struct IndicatorPane: View {
                     }
                     .disabled(!settings[.drips])
                     Slider(value: settings.binding(.dripGlow), in: 0...1) { Text("Glow") }
+                    Picker("Result", selection: settings.binding(.resultSide)) {
+                        Text("Left of the notch").tag(ResultSide.left)
+                        Text("Right of the notch").tag(ResultSide.right)
+                    }
+                    Toggle("Liquid Glass behind the result", isOn: settings.binding(.resultGlass))
                     Button("Preview") { NotchPreview.play(settings) }
                         .disabled(NotchIndicator.screen(anywhere: true) == nil)
                 } header: {
                     Text("Notch")
                 } footer: {
-                    Text("Without drips only the glow shows. Preview plays a few seconds of a made-up voice at the notch, then the result; the sliders change it as it plays.")
+                    Text("Without drips only the glow shows. The result is a check when the text is typed, a clipboard when it went to the clipboard. Preview plays a few seconds of a made-up voice at the notch, then the result; the sliders change it as it plays.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -53,6 +58,7 @@ enum NotchPreview {
 
     static func play(_ settings: SettingsStore) {
         let indicator = indicator ?? NotchIndicator(meter: Voice()) { settings.notchLook }
+        indicator.menuBarAppearance = { StatusMenu.menuBarAppearance }
         Self.indicator = indicator
         guard indicator.show(anywhere: true) else { return }
         plays += 1

@@ -16,7 +16,7 @@ public enum IndicatorStyle: String, CaseIterable, Identifiable {
         switch self {
         case .badge: "A Liquid Glass capsule next to the mouse pointer that reacts to your voice and ends with a check, a copy icon or a soft coral spin."
         case .caret: "Claude Code's own /voice level bar, drawn just right of the text caret."
-        case .notch: "The MacBook's notch glows with your voice, small black drips can seep from it, and a drop flows out with a check or a copy icon. On a screen without a notch, the badge shows instead."
+        case .notch: "The MacBook's notch glows with your voice, small black drips can seep from it, and a check or a clipboard comes out beside it. On a screen without a notch, the badge shows instead."
         }
     }
 }

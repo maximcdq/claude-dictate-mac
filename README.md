@@ -9,7 +9,7 @@ key and it settles on the final transcript.
 - No time limit while the key is held: Claude Code stops a recording after 2 minutes or 15 s of silence; ClaudeDictate
   picks up right after and keeps appending to the same text.
 - Three indicators, picked in Settings: the notch (the default) glowing with your voice, optionally with small black
-  drips, ending with a drop that flows out to the right with a check or a copy icon; a Liquid Glass badge next to the
+  drips, ending with a check or a clipboard on Liquid Glass beside the notch; a Liquid Glass badge next to the
   pointer that reacts to your voice and ends with a check, a copy icon or a soft coral spin; or Claude Code's own
   `/voice` bar right of the text caret.
 - No text field? Speak anyway: the text lands in the clipboard.
