@@ -105,7 +105,10 @@ final class Dictation {
         if settings[.builtInMic] { Mic.useBuiltIn() }
         if settings[.pauseMedia] { NowPlaying.pauseIfPlaying() }
         style = settings[.indicator]
-        if style == .notch, !notch.show() { style = .badge }  // no notch on the pointer's screen
+        if style == .notch, !notch.show() {
+            style = .badge
+            log("notch indicator unavailable (no notch on the pointer's screen, or no Metal): the badge instead")
+        }
         switch style {
         case .badge:
             indicator.show()
@@ -280,7 +283,7 @@ final class Dictation {
             pb.setString(text, forType: .string)
         }
         if style == .caret { return caret.hide() }
-        if style == .notch { return cancelled ? notch.hide() : notch.done(empty: text.isEmpty) }
+        if style == .notch { return cancelled ? notch.hide() : notch.done(text.isEmpty ? .empty : detached ? .copied : .typed) }
         if cancelled { return indicator.hide() }
         if text.isEmpty {
             indicator.badge.empty()

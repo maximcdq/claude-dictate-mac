@@ -10,7 +10,8 @@ key and it settles on the final transcript.
   picks up right after and keeps appending to the same text.
 - Three indicators, picked in Settings: a Liquid Glass badge next to the pointer that reacts to your voice
   and ends with a check, a copy icon or a soft coral spin; Claude Code's own `/voice` bar right of the text caret; or
-  small black drips seeping from the MacBook's notch, glowing with your voice (size, glow and count adjustable).
+  small black drips seeping from the MacBook's notch, glowing with your voice, with a drop flowing out to the right
+  with a check or a copy icon at the end (drips, length, width, count, how they melt together and the glow adjustable).
 - No text field? Speak anyway: the text lands in the clipboard.
 - **Esc** cancels and erases what this dictation typed.
 - Settings (menu bar icon → Settings…): the key, start at login, dictation language, built-in mic, indicator,

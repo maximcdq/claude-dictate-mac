@@ -1,31 +1,44 @@
 import AppKit
-import SwiftUI
+import Metal
+import QuartzCore
 
 // MARK: - Notch drips: black liquid seeping from the MacBook's notch while recording
-// A few small drips hang from the notch's lower edge, swell and lengthen with the voice, let a drop go and grow back.
-// They are metaballs: soft shapes blurred and cut at half alpha, so the drips, their necks and the notch merge into
-// one liquid outline. Under the black runs a glow in the badge's colors, faint in silence, brighter with the voice.
-// The notch itself is real hardware: the black drawn inside it doesn't show, the drips seem to come out of it.
+// A few small drips hang from the notch's lower edge and lengthen with the voice; a glow in the badge's colors runs
+// round the notch and the drips, faint in silence, brighter with the voice. When the text lands, a drop flows out of
+// the notch to the right with a white check (typed) or copy icon (in the clipboard) on it, then everything draws back.
+// It is one signed distance field drawn by a Metal shader on every display refresh (120 Hz on ProMotion): the notch,
+// the drips and the drop are smooth-unioned, so they merge like liquid, with crisp antialiased edges at any size.
+// The notch itself is hardware: the black drawn inside it doesn't show, the drips seem to come out of it.
 
-// How the drips look, from the settings: `size` scales them (1 is the default, small), `glow` is the glow's
-// strength 0...1, `drips` how many hang from the notch.
+// How the drips look, from the settings, read every frame so the sliders show live: `drips` off leaves only the
+// glow; `length` and `width` scale the drips (1 is the default, small); `count` how many; `blend` 0...1 how much
+// they melt into each other and the notch; `glow` 0...1 the glow's strength and reach, 0 none.
 public struct NotchLook {
-    public var size: CGFloat
+    public var drips: Bool
+    public var length: CGFloat
+    public var width: CGFloat
+    public var count: Int
+    public var blend: CGFloat
     public var glow: CGFloat
-    public var drips: Int
 
-    public init(size: CGFloat, glow: CGFloat, drips: Int) {
-        self.size = size
-        self.glow = glow
+    public init(drips: Bool, length: CGFloat, width: CGFloat, count: Int, blend: CGFloat, glow: CGFloat) {
         self.drips = drips
+        self.length = length
+        self.width = width
+        self.count = count
+        self.blend = blend
+        self.glow = glow
     }
 }
 
 final class NotchDrips {
-    enum Mode { case off, live, processing, done, empty }
+    enum Mode { case off, live, processing, typed, copied, empty }
+
+    static let maxDrips = 9
+    static let leave: TimeInterval = 0.45  // the drips and the drop draw back into the notch
 
     private let meter: LevelSource
-    private let look: () -> NotchLook  // read every frame, so the settings show live
+    private let look: () -> NotchLook
     var notch = CGRect.zero  // the notch in the view, top-left origin
     private(set) var mode = Mode.off
     private var smoothed: CGFloat = 0
@@ -35,7 +48,6 @@ final class NotchDrips {
     private var startedAt = Date()  // hue clock
     private var modeAt = Date()
     private var leavingAt: Date?
-    static let leave: TimeInterval = 0.45  // the drips draw back into the notch
 
     init(meter: LevelSource, look: @escaping () -> NotchLook) {
         self.meter = meter
@@ -69,130 +81,307 @@ final class NotchDrips {
         meter.stop()
     }
 
-    // one drip's shapes at the drips' clock `t`: a neck from the notch to a drop that lengthens, lets go and falls
-    private func drip(_ i: Int, of n: Int, t: CGFloat, length: CGFloat, radius: CGFloat) -> [CGRect] {
-        // spread over the notch's flat middle, each a little off its slot, with its own pace and size
-        let seed = { (k: Int) in CGFloat(abs(sin(Double(i * 7 + k) * 12.9898) * 43758.5453).truncatingRemainder(dividingBy: 1)) }
-        let slot = n == 1 ? 0.5 : 0.18 + 0.64 * CGFloat(i) / CGFloat(n - 1)
-        let x = notch.minX + notch.width * (slot + (seed(1) - 0.5) * 0.5 / CGFloat(n))
-        let period = 1.7 + seed(2) * 1.1
-        let r = radius * (0.75 + 0.5 * seed(3))
-        let u = ((t / period + seed(4)).truncatingRemainder(dividingBy: 1))
-        let top = notch.maxY - r  // the stem starts inside the notch, so it merges with it
-        var shapes: [CGRect] = []
-        let circle = { (y: CGFloat, r: CGFloat) in shapes.append(CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)) }
-        let grow: CGFloat = 0.72  // of the cycle: the drip lengthens, then the drop falls
-        if u < grow {
-            let k = Easing.smoothstep(u / grow)
-            let end = notch.maxY + length * (0.25 + 0.75 * k) * (0.55 + 0.45 * seed(5))
-            // the neck: circles thinning from the notch down to the drop
-            let steps = 5
-            for s in 0...steps {
-                let f = CGFloat(s) / CGFloat(steps)
-                circle(top + (end - top) * f, r * (1 - 0.45 * f))
-            }
-            circle(end, r * (0.8 + 0.35 * k))
-        } else {
-            let k = (u - grow) / (1 - grow)
-            // the stem draws back up as the drop falls away, shrinking
-            let end = notch.maxY + length * (1 - k) * (0.55 + 0.45 * seed(5))
-            for s in 0...3 {
-                let f = CGFloat(s) / 3
-                circle(top + (end - top) * f, r * (1 - 0.45 * f))
-            }
-            let falling = notch.maxY + length * (0.55 + 0.45 * seed(5)) + length * 0.9 * k * k
-            let drop = r * 1.15 * (1 - k)
-            if drop > 0.5 { circle(falling, drop) }
-        }
-        return shapes
+    // a fixed pseudo-random 0..<1 per drip and key, so every drip keeps its own place, pace and size
+    private static func seed(_ i: Int, _ k: Int) -> CGFloat {
+        CGFloat(abs(sin(Double(i * 7 + k) * 12.9898) * 43758.5453).truncatingRemainder(dividingBy: 1))
     }
 
-    func draw(_ ctx: inout GraphicsContext, size: CGSize, now: Date) {
-        guard mode != .off, notch.width > 0 else { return }
+    // The shader's input for this frame, laid out as `NotchShader.source` reads it.
+    func uniforms(scale: CGFloat, now: Date) -> [Float] {
         let look = look()
-        let dt = CGFloat(min(now.timeIntervalSince(lastFrame), 0.1))
+        let dt = CGFloat(min(max(now.timeIntervalSince(lastFrame), 0), 0.1))
         lastFrame = now
         if mode == .live { meter.watch() }
         let level = mode == .live ? meter.level : 0
         let target = min(level * 1.8, 1)
-        smoothed += (target - smoothed) * (target > smoothed ? 0.3 : 0.08)
+        // per second, so it eases the same at 60 and 120 Hz: swells fast, settles softer
+        smoothed += (target - smoothed) * (1 - exp(-dt * (target > smoothed ? 18 : 6)))
         let speech = min(max((level - 0.1) / 0.1, 0), 1)  // Claude's 0.15 threshold, as on the badge
         let since = CGFloat(now.timeIntervalSince(modeAt))
+        let leaving = leavingAt.map { Easing.smoothstep(min(CGFloat(now.timeIntervalSince($0) / Self.leave), 1)) } ?? 0
 
-        // how far out the drips are: out with the recording (a little more with the voice), in when it's over
-        var out: CGFloat = mode == .live ? 0.55 + 0.45 * smoothed : mode == .processing ? 0.5 : 0.35
-        if let leavingAt { out *= 1 - min(CGFloat(now.timeIntervalSince(leavingAt) / Self.leave), 1) }
-        reach += (out - reach) * min(dt * 6, 1)
-        flow += dt * (mode == .live ? 0.55 + 0.9 * smoothed : 0.45)
+        // out with the recording (further with the voice), half in while the text finishes, in when it's over
+        var out: CGFloat
+        switch mode {
+        case .off: out = 0
+        case .live: out = 0.3 + 0.7 * smoothed
+        case .processing: out = 0.35
+        case .typed, .copied, .empty: out = 0.2
+        }
+        if !look.drips { out = 0 }
+        out *= 1 - leaving
+        reach += (out - reach) * (1 - exp(-dt * 8))
+        flow += dt * (mode == .live ? 0.6 + 1.2 * smoothed : 0.4)
 
-        // the glow: the badge's color with the voice, a slow pulse while the text finishes, a flash when it lands,
-        // soft coral when nothing came
+        // the glow: the badge's color, faint in silence and bright with the voice, a slow pulse while the text
+        // finishes, a flash when it lands, soft coral when nothing came
         let hue = Palette.color(at: CGFloat(now.timeIntervalSince(startedAt)))
         var color = hue
         var glow: CGFloat
         switch mode {
-        case .off: return
-        case .live: glow = 0.18 + 0.82 * speech
-        case .processing: glow = 0.2 + 0.4 * Easing.pulse(since, period: 1.2)
-        case .done: glow = 0.9 * max(1 - since / 0.6, 0.3)
+        case .off: glow = 0
+        case .live: glow = 0.25 + 0.75 * speech
+        case .processing: glow = 0.3 + 0.4 * Easing.pulse(since, period: 1.2)
+        case .typed, .copied: glow = 0.55 + 0.45 * max(1 - since / 0.5, 0)
         case .empty:
             color = hue.blended(withFraction: Easing.smoothstep(min(since / 0.25, 1)), of: Palette.nothing)!
-            glow = 0.6
+            glow = 0.7
         }
-        if let leavingAt { glow *= 1 - min(CGFloat(now.timeIntervalSince(leavingAt) / Self.leave), 1) }
-        glow *= look.glow
+        glow *= (1 - leaving) * min(look.glow * 1.4, 1)
+        let rgb = color.usingColorSpace(.sRGB) ?? color
 
-        let scale = max(look.size, 0.3)
-        let length = 20 * scale * reach
-        let radius = 3 * scale * (0.6 + 0.4 * reach)
-        let shapes = (0..<max(look.drips, 1)).flatMap { drip($0, of: max(look.drips, 1), t: flow, length: length, radius: radius) }
-        // the notch's lower edge, a little inside the real one so the black never shows past it; the top runs off
-        // the view, so only its bottom corners round
-        let body = Path(roundedRect: CGRect(x: notch.minX + 3, y: -20, width: notch.width - 6, height: notch.maxY + 20 - 0.5),
-                        cornerRadius: min(9, notch.width / 4))
-        let blur = 2.6 * scale
+        var u = [Float](repeating: 0, count: 22 + 5 * Self.maxDrips)
+        u[2] = Float(scale)
+        (u[3], u[4], u[5], u[6]) = (Float(notch.minX), Float(notch.minY), Float(notch.maxX), Float(notch.maxY))
+        (u[7], u[8], u[9]) = (Float(rgb.redComponent), Float(rgb.greenComponent), Float(rgb.blueComponent))
+        u[10] = Float(glow)
+        u[11] = Float(2 + 12 * look.glow)  // how far the glow reaches, in points
+        u[12] = Float(2 + 6 * look.blend)  // the fillet where a drip leaves the notch
+        u[13] = Float(0.5 + 9 * look.blend)  // how much neighboring drips melt together
 
-        if glow > 0.01 {
-            var layer = ctx
-            layer.addFilter(.blur(radius: 5 + 3 * smoothed))
-            layer.addFilter(.alphaThreshold(min: 0.5, color: Color(nsColor: color).opacity(Double(min(glow, 1)))))
-            layer.addFilter(.blur(radius: blur))
-            layer.drawLayer { inner in
-                inner.fill(body, with: .color(.white))
-                for r in shapes { inner.fill(Path(ellipseIn: r.insetBy(dx: -1.5, dy: -1.5)), with: .color(.white)) }
-            }
+        // the drop with the result flows out of the notch's right side, springs into place and draws back in
+        if mode == .typed || mode == .copied {
+            let r = min(11, (notch.height - 8) / 2)
+            let flowOut = Easing.pop(min(since / 0.35, 1)) * (1 - leaving)
+            u[14] = Float(notch.maxX - r - 4 + (2 * r + 2) * flowOut)  // out to just past the notch, still joined to it
+            u[15] = Float(notch.midY)
+            u[16] = Float(r)
+            u[17] = Float(mode == .typed ? 1 : 2)
+            u[18] = Float(min(max((since - 0.15) / 0.28, 0), 1))  // the check draws stroke by stroke
+            u[19] = Float(Easing.pop(min(max((since - 0.1) / 0.3, 0), 1)) * r / 11)
+            u[20] = Float(min(max((since - 0.1) / 0.1, 0), 1) * (1 - leaving))
         }
-        var layer = ctx
-        layer.addFilter(.alphaThreshold(min: 0.5, color: .black))
-        layer.addFilter(.blur(radius: blur))
-        layer.drawLayer { inner in
-            inner.fill(body, with: .color(.white))
-            for r in shapes { inner.fill(Path(ellipseIn: r), with: .color(.white)) }
+
+        // spread over the notch's flat middle, each a little off its slot, breathing at its own pace
+        let n = look.drips ? min(max(look.count, 1), Self.maxDrips) : 0
+        u[21] = Float(n)
+        for i in 0..<n {
+            let seed = { Self.seed(i, $0) }
+            let slot = n == 1 ? 0.5 : 0.2 + 0.6 * CGFloat(i) / CGFloat(n - 1)
+            let x = notch.minX + notch.width * (slot + (seed(1) - 0.5) * 0.45 / CGFloat(n))
+            let pace = 0.7 + 0.7 * seed(2)
+            let wave = 0.5 + 0.3 * sin(flow * pace * 2 + seed(4) * 6.3) + 0.2 * sin(flow * pace * 3.3 + seed(6) * 6.3)
+            let length = 22 * look.length * reach * (0.6 + 0.4 * seed(5)) * (0.35 + 0.65 * wave)
+            let bulb = 2.4 * look.width * (0.75 + 0.5 * seed(3)) * (0.65 + 0.35 * reach)
+            let j = 22 + 5 * i
+            u[j] = Float(x)
+            u[j + 1] = Float(notch.maxY - 4)  // the neck starts inside the notch
+            u[j + 2] = Float(notch.maxY + length - bulb)  // the bulb's center: the tip hangs `length` below
+            u[j + 3] = Float(bulb * 0.55)
+            u[j + 4] = Float(bulb)
         }
+        return u
     }
 }
 
-private struct NotchDripsView: View {
-    let drips: NotchDrips
+// The shader and the GPU state, built once and shared: the source compiles off the main thread at launch.
+final class NotchShader {
+    static let shared = NotchShader()
 
-    var body: some View {
-        TimelineView(.animation) { timeline in
-            Canvas { ctx, size in drips.draw(&ctx, size: size, now: timeline.date) }
+    let device = MTLCreateSystemDefaultDevice()
+    let queue: MTLCommandQueue?
+    private(set) var pipeline: MTLRenderPipelineState?
+
+    private init() {
+        queue = device?.makeCommandQueue()
+        device?.makeLibrary(source: Self.source, options: nil) { [weak self] library, _ in
+            guard let self, let device = self.device, let library else { return }
+            let descriptor = MTLRenderPipelineDescriptor()
+            descriptor.vertexFunction = library.makeFunction(name: "notchVertex")
+            descriptor.fragmentFunction = library.makeFunction(name: "notchFragment")
+            descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+            let pipeline = try? device.makeRenderPipelineState(descriptor: descriptor)
+            DispatchQueue.main.async { self.pipeline = pipeline }
         }
+    }
+
+    // Distances in points, top-left origin. u: [2] scale, [3...6] notch minX minY maxX maxY, [7...9] glow color,
+    // [10] glow strength, [11] glow reach, [12] notch fillet, [13] drip fillet, [14...16] result drop center x y and
+    // radius (0: none), [17] icon 1 check 2 copy, [18] check progress, [19] icon scale, [20] icon alpha,
+    // [21] drip count, [22...] per drip: x, neck y, bulb y, neck radius, bulb radius.
+    static let source = """
+    #include <metal_stdlib>
+    using namespace metal;
+
+    struct VOut { float4 position [[position]]; };
+
+    vertex VOut notchVertex(uint id [[vertex_id]]) {
+        float2 uv = float2((id << 1) & 2, id & 2);
+        VOut out;
+        out.position = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+        return out;
+    }
+
+    static float smin(float a, float b, float k) {
+        float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+        return mix(b, a, h) - k * h * (1.0 - h);
+    }
+
+    static float roundedBox(float2 p, float2 center, float2 extent, float r) {
+        float2 q = abs(p - center) - extent + r;
+        return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+    }
+
+    // round ends of radius r1 and r2, h apart along y, straight sides between
+    static float unevenCapsule(float2 p, float r1, float r2, float h) {
+        h = max(h, abs(r1 - r2) + 0.01);
+        p.x = abs(p.x);
+        float b = (r1 - r2) / h;
+        float a = sqrt(1.0 - b * b);
+        float k = dot(p, float2(-b, a));
+        if (k < 0.0) return length(p) - r1;
+        if (k > a * h) return length(p - float2(0.0, h)) - r2;
+        return dot(p, float2(a, b)) - r1;
+    }
+
+    static float segment(float2 p, float2 a, float2 b) {
+        float2 pa = p - a, ba = b - a;
+        float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0);
+        return length(pa - ba * h);
+    }
+
+    fragment float4 notchFragment(VOut in [[stage_in]], constant float *u [[buffer(0)]]) {
+        float scale = u[2];
+        float2 p = in.position.xy / scale;
+        float4 notch = float4(u[3], u[4], u[5], u[6]);
+
+        // the notch, a little inside the real one so the black never shows past it; its top runs off the view
+        float2 lo = float2(notch.x + 3.0, -40.0), hi = float2(notch.z - 3.0, notch.w - 0.5);
+        float d = roundedBox(p, (lo + hi) * 0.5, (hi - lo) * 0.5, min(9.0, (hi.x - lo.x) * 0.25));
+
+        int count = int(u[21]);
+        float drips = 1e5;
+        for (int i = 0; i < count; i++) {
+            int j = 22 + 5 * i;
+            float2 neck = float2(u[j], u[j + 1]);
+            drips = smin(drips, unevenCapsule(p - neck, u[j + 3], u[j + 4], u[j + 2] - u[j + 1]), u[13]);
+        }
+        if (count > 0) d = smin(d, drips, u[12]);
+
+        float icon = 0.0;
+        float r = u[16];
+        if (r > 0.0) {
+            float2 c = float2(u[14], u[15]);
+            d = smin(d, length(p - c) - r, 8.0);
+            float s = max(u[19], 1e-3);
+            float stroke = 1e5;
+            if (u[17] < 1.5) {
+                // the badge's check, drawn from its left tip down and up to the right
+                float2 a = c + float2(-5.5, -0.5) * s, b = c + float2(-1.8, 3.5) * s, e = c + float2(5.5, -4.5) * s;
+                float l1 = length(b - a), l2 = length(e - b);
+                float drawn = (l1 + l2) * (1.0 - (1.0 - u[18]) * (1.0 - u[18]));
+                if (drawn > 0.0) {
+                    stroke = segment(p, a, a + (b - a) * min(drawn / l1, 1.0));
+                    if (drawn > l1) stroke = min(stroke, segment(p, b, b + (e - b) * min((drawn - l1) / l2, 1.0)));
+                    stroke -= 1.25 * s;
+                }
+            } else {
+                // two sheets, the back one showing only past the front one's edge
+                float front = roundedBox(p, c + float2(-1.4, 1.4) * s, float2(3.4, 4.2) * s, 1.5 * s);
+                float back = roundedBox(p, c + float2(1.4, -1.4) * s, float2(3.4, 4.2) * s, 1.5 * s);
+                stroke = abs(front) - 0.7 * s;
+                if (front > 1.4 * s) stroke = min(stroke, abs(back) - 0.7 * s);
+            }
+            icon = clamp(0.5 - stroke * scale, 0.0, 1.0) * u[20];
+        }
+
+        float fill = clamp(0.5 - d * scale, 0.0, 1.0);
+        float glow = u[10] * exp(-max(d, 0.0) / max(u[11], 0.01)) * (1.0 - fill);
+        float3 rgb = float3(u[7], u[8], u[9]) * glow + float3(icon * fill);
+        return float4(rgb, fill + glow);
+    }
+    """
+}
+
+// Draws the drips into a Metal layer on every refresh of the screen it's on, only while shown.
+private final class NotchView: NSView {
+    let drips: NotchDrips
+    private var link: CADisplayLink?
+
+    init(frame: NSRect, drips: NotchDrips) {
+        self.drips = drips
+        super.init(frame: frame)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("not from a nib") }
+
+    override func makeBackingLayer() -> CALayer {
+        let layer = CAMetalLayer()
+        layer.device = NotchShader.shared.device
+        layer.pixelFormat = .bgra8Unorm
+        layer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
+        layer.isOpaque = false
+        layer.framebufferOnly = true
+        return layer
+    }
+
+    private var metal: CAMetalLayer? { layer as? CAMetalLayer }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        resize()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        resize()
+    }
+
+    private func resize() {
+        let scale = window?.backingScaleFactor ?? 2
+        metal?.contentsScale = scale
+        metal?.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+    }
+
+    func start() {
+        resize()
+        link?.invalidate()
+        link = displayLink(target: self, selector: #selector(step))
+        link?.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        link?.add(to: .main, forMode: .common)
+    }
+
+    func stop() {
+        link?.invalidate()
+        link = nil
+    }
+
+    @objc private func step() {
+        let shader = NotchShader.shared
+        guard drips.mode != .off, let metal, let pipeline = shader.pipeline, let queue = shader.queue,
+              let drawable = metal.nextDrawable(), let buffer = queue.makeCommandBuffer() else { return }
+        let uniforms = drips.uniforms(scale: metal.contentsScale, now: Date())
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = drawable.texture
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        pass.colorAttachments[0].storeAction = .store
+        guard let encoder = buffer.makeRenderCommandEncoder(descriptor: pass) else { return }
+        encoder.setRenderPipelineState(pipeline)
+        uniforms.withUnsafeBytes { encoder.setFragmentBytes($0.baseAddress!, length: $0.count, index: 0) }
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        encoder.endEncoding()
+        buffer.present(drawable)
+        buffer.commit()
     }
 }
 
 // The drips' window: borderless, click-through, over the menu bar around the notch. Only screens with a notch
 // can show it: the dictation falls back to the badge elsewhere.
 public final class NotchIndicator {
-    static let side: CGFloat = 40  // room beside the notch for the glow
+    public enum Outcome { case typed, copied, empty }
+
+    static let side: CGFloat = 60  // room beside the notch for the glow and the result drop
     static let below: CGFloat = 110  // room under it for the longest drips
     private let drips: NotchDrips
     private let panel: NSPanel
+    private var view: NotchView?
     private var generation = 0  // a show that comes while the previous hide still draws the drips in wins
 
     public init(meter: LevelSource, look: @escaping () -> NotchLook) {
         drips = NotchDrips(meter: meter, look: look)
+        _ = NotchShader.shared  // start compiling now, so the first dictation finds it ready
         panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.level = .statusBar
         panel.isOpaque = false
@@ -210,23 +399,27 @@ public final class NotchIndicator {
         return notched.first { $0.frame.contains(m) } ?? (anywhere ? notched.first : nil)
     }
 
-    // false when there's no notch to hang from
+    // false when there's no notch to hang from, or the shader isn't ready
     @discardableResult
     public func show(anywhere: Bool = false) -> Bool {
-        guard let screen = Self.screen(anywhere: anywhere),
+        guard NotchShader.shared.pipeline != nil, let screen = Self.screen(anywhere: anywhere),
               let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea else { return false }
         generation += 1
+        view?.stop()
         let f = screen.frame
         let width = f.width - left.width - right.width
         let height = screen.safeAreaInsets.top
-        panel.setFrame(NSRect(x: f.minX + left.width - Self.side, y: f.maxY - height - Self.below,
-                              width: width + Self.side * 2, height: height + Self.below), display: false)
+        let frame = NSRect(x: f.minX + left.width - Self.side, y: f.maxY - height - Self.below,
+                           width: width + Self.side * 2, height: height + Self.below)
+        panel.setFrame(frame, display: false)
         drips.notch = CGRect(x: Self.side, y: 0, width: width, height: height)
-        // the view lives only while shown: its timeline stops with it
-        panel.contentView = NSHostingView(rootView: NotchDripsView(drips: drips))
+        // the view lives only while shown
+        let view = NotchView(frame: NSRect(origin: .zero, size: frame.size), drips: drips)
+        self.view = view
+        panel.contentView = view
         drips.listen()
-        panel.alphaValue = 1
         panel.orderFrontRegardless()
+        view.start()
         return true
     }
 
@@ -234,10 +427,15 @@ public final class NotchIndicator {
         if drips.mode == .live { drips.set(.processing) }
     }
 
-    // the text landed (a flash of the color) or nothing came (soft coral); then the drips draw back in
-    public func done(empty: Bool) {
-        drips.set(empty ? .empty : .done)
-        hide(after: empty ? 0.5 : 0.35)
+    // the text landed in the field (a check) or in the clipboard (a copy icon) on a drop flowing out to the right,
+    // or nothing came (soft coral); then the drips draw back in
+    public func done(_ outcome: Outcome) {
+        switch outcome {
+        case .typed: drips.set(.typed)
+        case .copied: drips.set(.copied)
+        case .empty: drips.set(.empty)
+        }
+        hide(after: outcome == .empty ? 0.5 : outcome == .copied ? 0.9 : 0.8)
     }
 
     private func hide(after delay: TimeInterval) {
@@ -253,6 +451,8 @@ public final class NotchIndicator {
         drips.leave()
         DispatchQueue.main.asyncAfter(deadline: .now() + NotchDrips.leave) { [weak self] in
             guard let self, self.generation == shown else { return }
+            self.view?.stop()
+            self.view = nil
             self.drips.off()
             self.panel.orderOut(nil)
             self.panel.contentView = nil

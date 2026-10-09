@@ -22,15 +22,21 @@ struct IndicatorPane: View {
             }
             if settings[.indicator] == .notch {
                 Section {
-                    Slider(value: settings.binding(.dripSize), in: 0.5...2) { Text("Size") }
+                    Toggle("Drips", isOn: settings.binding(.drips))
+                    Group {
+                        Slider(value: settings.binding(.dripLength), in: 0.5...2) { Text("Length") }
+                        Slider(value: settings.binding(.dripWidth), in: 0.5...2) { Text("Width") }
+                        Slider(value: settings.binding(.dripCount), in: 1...9, step: 1) { Text("Count") }
+                        Slider(value: settings.binding(.dripBlend), in: 0...1) { Text("Melt together") }
+                    }
+                    .disabled(!settings[.drips])
                     Slider(value: settings.binding(.dripGlow), in: 0...1) { Text("Glow") }
-                    Slider(value: settings.binding(.dripCount), in: 1...9, step: 1) { Text("Drips") }
                     Button("Preview") { NotchPreview.play(settings) }
                         .disabled(NotchIndicator.screen(anywhere: true) == nil)
                 } header: {
-                    Text("Drips")
+                    Text("Notch")
                 } footer: {
-                    Text("Preview plays a few seconds of a made-up voice at the notch; the sliders change it as it plays.")
+                    Text("Without drips only the glow shows. Preview plays a few seconds of a made-up voice at the notch, then the result; the sliders change it as it plays.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -43,7 +49,7 @@ struct IndicatorPane: View {
 // The drips at the notch with a voice that comes and goes, for trying the sliders.
 enum NotchPreview {
     private static var indicator: NotchIndicator?
-    private static var plays = 0
+    private static var plays = 0  // each preview ends with the other result: a check, then a copy icon
 
     static func play(_ settings: SettingsStore) {
         let indicator = indicator ?? NotchIndicator(meter: Voice()) { settings.notchLook }
@@ -56,7 +62,7 @@ enum NotchPreview {
             indicator.process()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                 guard plays == play else { return }
-                indicator.done(empty: false)
+                indicator.done(play % 2 == 1 ? .typed : .copied)
             }
         }
     }
