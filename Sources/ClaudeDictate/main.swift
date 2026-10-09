@@ -19,6 +19,7 @@ let hotkeyTap = HotkeyTap(dictation: dictation, settings: settings)
 
 func shutDown() {
     Mic.restore()
+    NowPlaying.resume()
     dictation.pty.stop()
 }
 

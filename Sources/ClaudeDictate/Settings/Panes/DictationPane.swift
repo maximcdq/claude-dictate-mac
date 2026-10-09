@@ -24,6 +24,13 @@ struct DictationPane: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+            Section {
+                Toggle("Pause music and videos while dictating", isOn: settings.binding(.pauseMedia))
+            } footer: {
+                Text("Whatever is playing (Music, Spotify, a video in the browser) pauses when the dictation begins and plays on when it ends. Nothing starts that wasn't playing.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
     }
