@@ -9,7 +9,7 @@ extension Setting {
     // so every install moves to the notch once and can pick the badge or the caret again
     static var indicator: Setting<IndicatorStyle> { .init("indicatorStyle", default: .notch) }
     // the notch drips: on or just the glow; length and width (1 small, up to 2), how many, how much they melt
-    // together 0...1, the glow 0...1 (0 none)
+    // together 0...1, the glow 0...1.5 (0 none)
     static var drips: Setting<Bool> { .init("drips", default: false) }
     static var dripLength: Setting<Double> { .init("dripLength", default: 1) }
     static var dripWidth: Setting<Double> { .init("dripWidth", default: 1) }

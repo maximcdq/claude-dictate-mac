@@ -30,7 +30,7 @@ struct IndicatorPane: View {
                         Slider(value: settings.binding(.dripBlend), in: 0...1) { Text("Melt together") }
                     }
                     .disabled(!settings[.drips])
-                    Slider(value: settings.binding(.dripGlow), in: 0...1) { Text("Glow") }
+                    Slider(value: settings.binding(.dripGlow), in: 0...1.5) { Text("Glow") }
                     Picker("Result", selection: settings.binding(.resultPlace)) {
                         ForEach(NotchResultPlace.allCases) { Text($0.title).tag($0) }
                     }

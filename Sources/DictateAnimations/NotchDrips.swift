@@ -14,7 +14,7 @@ import SwiftUI
 
 // How the drips look, from the settings, read every frame so the sliders show live: `drips` off leaves only the
 // glow; `length` and `width` scale the drips (1 is the default, small); `count` how many; `blend` 0...1 how much
-// they melt into each other and the notch; `glow` 0...1 the glow's strength and reach, 0 none; the result icon
+// they melt into each other and the notch; `glow` 0...1.5 the glow's strength and reach, 0 none; the result icon
 // sits on Liquid Glass (`glass`), or bare in `color`, and comes out of the notch's left or right side or below it
 // (`result`).
 public enum NotchResultPlace: String, CaseIterable, Identifiable {
@@ -170,8 +170,8 @@ final class NotchDrips {
         var rest: CGFloat
         switch mode {
         case .off: rest = 0
-        case .live: rest = 0.25 + 0.75 * speech * Easing.smoothstep(min(max((live - 0.25) / 0.3, 0), 1))
-        case .processing, .copied: rest = 0.25
+        case .live: rest = 0.4 + 0.6 * speech * Easing.smoothstep(min(max((live - 0.25) / 0.3, 0), 1))
+        case .processing, .copied: rest = 0.4
         case .typed, .empty:
             // the color turns ahead of the swell, so the muddy middle between the voice's hue and the green passes dim
             let tint = Easing.smoothstep(min(since / (Self.ending.swell * 0.5), 1))
@@ -186,7 +186,7 @@ final class NotchDrips {
             shine += (rest - shine) * (1 - exp(-dt * (rest > shine ? 14 : 5)))
         }
         var glow = max(flare, shine)
-        glow *= (1 - leaving) * min(look.glow * 1.4, 1)
+        glow *= (1 - leaving) * (min(look.glow * 1.4, 1) + 0.6 * max(look.glow - 1, 0))  // past 1 brighter still
         let rgb = color.usingColorSpace(.sRGB) ?? color
 
         var u = [Float](repeating: 0, count: 15 + 5 * Self.maxDrips)
