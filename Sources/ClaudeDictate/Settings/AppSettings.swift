@@ -16,8 +16,10 @@ extension Setting {
     static var dripCount: Setting<Double> { .init("dripCount", default: 5) }
     static var dripBlend: Setting<Double> { .init("dripBlend", default: 0.5) }
     static var dripGlow: Setting<Double> { .init("dripGlow", default: 0.5) }
-    // the result icon by the notch: on Liquid Glass or bare, on the notch's right or left or below it
+    // the result icon by the notch: on Liquid Glass or bare (white, black or like the menu bar), on the notch's
+    // right or left or below it
     static var resultGlass: Setting<Bool> { .init("resultGlass", default: true) }
+    static var resultColor: Setting<NotchResultColor> { .init("resultColor", default: .menuBar) }
     static var resultPlace: Setting<NotchResultPlace> { .init("resultSide", default: .below) }
     // a BCP 47 code passed to the hidden session as Claude Code's `language`; empty follows the user's own setting
     static var language: Setting<String> { .init("language", default: "") }
@@ -34,7 +36,7 @@ extension SettingsStore {
     var notchLook: NotchLook {
         NotchLook(drips: self[.drips], length: self[.dripLength], width: self[.dripWidth],
                   count: Int(self[.dripCount].rounded()), blend: self[.dripBlend], glow: self[.dripGlow],
-                  glass: self[.resultGlass], result: self[.resultPlace])
+                  glass: self[.resultGlass], result: self[.resultPlace], color: self[.resultColor])
     }
 }
 

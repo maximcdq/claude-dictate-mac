@@ -35,12 +35,16 @@ struct IndicatorPane: View {
                         ForEach(NotchResultPlace.allCases) { Text($0.title).tag($0) }
                     }
                     Toggle("Liquid Glass behind the result", isOn: settings.binding(.resultGlass))
+                    Picker("Result color", selection: settings.binding(.resultColor)) {
+                        ForEach(NotchResultColor.allCases) { Text($0.title).tag($0) }
+                    }
+                    .disabled(settings[.resultGlass])
                     Button("Preview") { NotchPreview.play(settings) }
                         .disabled(NotchIndicator.screen(anywhere: true) == nil)
                 } header: {
                     Text("Notch")
                 } footer: {
-                    Text("Without drips only the glow shows. The result is a check when the text is typed, a clipboard when it went to the clipboard. Preview plays a few seconds of a made-up voice at the notch, then the result; the sliders change it as it plays.")
+                    Text("Without drips only the glow shows. The result is a check when the text is typed, a clipboard when it went to the clipboard; on Liquid Glass the glass picks its color, bare it's the color you pick. Preview plays a few seconds of a made-up voice at the notch, then the result; the sliders change it as it plays.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

@@ -14,7 +14,8 @@ import SwiftUI
 // How the drips look, from the settings, read every frame so the sliders show live: `drips` off leaves only the
 // glow; `length` and `width` scale the drips (1 is the default, small); `count` how many; `blend` 0...1 how much
 // they melt into each other and the notch; `glow` 0...1 the glow's strength and reach, 0 none; the result icon
-// sits on Liquid Glass (`glass`) and comes out of the notch's left or right side or below it (`result`).
+// sits on Liquid Glass (`glass`), or bare in `color`, and comes out of the notch's left or right side or below it
+// (`result`).
 public enum NotchResultPlace: String, CaseIterable, Identifiable {
     case left, right, below
 
@@ -29,6 +30,21 @@ public enum NotchResultPlace: String, CaseIterable, Identifiable {
     }
 }
 
+// the bare result icon's color (on Liquid Glass the glass picks it, as the system's own controls do)
+public enum NotchResultColor: String, CaseIterable, Identifiable {
+    case menuBar, white, black
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .menuBar: "Like the menu bar"
+        case .white: "White"
+        case .black: "Black"
+        }
+    }
+}
+
 public struct NotchLook {
     public var drips: Bool
     public var length: CGFloat
@@ -38,9 +54,10 @@ public struct NotchLook {
     public var glow: CGFloat
     public var glass: Bool
     public var result: NotchResultPlace
+    public var color: NotchResultColor
 
     public init(drips: Bool, length: CGFloat, width: CGFloat, count: Int, blend: CGFloat, glow: CGFloat,
-                glass: Bool, result: NotchResultPlace) {
+                glass: Bool, result: NotchResultPlace, color: NotchResultColor = .menuBar) {
         self.drips = drips
         self.length = length
         self.width = width
@@ -49,6 +66,7 @@ public struct NotchLook {
         self.glow = glow
         self.glass = glass
         self.result = result
+        self.color = color
     }
 }
 
@@ -348,16 +366,16 @@ private final class NotchView: NSView {
     }
 }
 
-// The result under the notch or beside it: the system's check or clipboard symbol in the menu bar's own color
+// The result under the notch or beside it: the system's check or clipboard symbol on Liquid Glass as the system
+// draws it, or bare in white, black or the menu bar's color
 // (dark on a light menu bar, white on a dark one), on a Liquid Glass capsule or bare. It springs out of the notch's
 // side, sharpening out of a blur as the check draws itself, and melts back into a blur.
 final class NotchResult: ObservableObject {
     @Published var symbol: String?
     var glass = true
     var place = NotchResultPlace.right
-    // the menu bar's text is white or black with the wallpaper, and the result takes it, under the notch too (nil:
-    // not known, the system's). Set outright: Liquid Glass would otherwise pick its own by what's behind it, black
-    // over a light wallpaper or window under a white menu bar
+    // the bare icon's color: white (true) or black, set outright; nil on Liquid Glass, which picks it by what's
+    // behind it, as the system's own glass controls do, in the system's light or dark glass
     var dark: Bool?
 }
 
@@ -490,8 +508,8 @@ public final class NotchIndicator {
             let look = look(), notch = drips.notch
             result.glass = look.glass
             result.place = look.result
-            // the capsule 16 pt off the notch's side in the menu bar, or 8 pt under its middle over the windows, in the
-            // menu bar's colors; in a view with room round it for the glass's rim and the spring
+            // the capsule 16 pt off the notch's side in the menu bar, or 8 pt under its middle over the windows; in a
+            // view with room round it for the glass's rim and the spring
             let size = Self.resultSize, w = size.width + 24, h = size.height + 24
             let half = size.width / 2
             switch look.result {
@@ -499,9 +517,14 @@ public final class NotchIndicator {
             case .right: resultView.frame = NSRect(x: notch.maxX + 16 + half - w / 2, y: Self.below, width: w, height: notch.height)
             case .below: resultView.frame = NSRect(x: notch.midX - w / 2, y: Self.below - 8 - size.height / 2 - h / 2, width: w, height: h)
             }
-            let bar = menuBarAppearance()
-            resultView.appearance = bar
-            result.dark = bar.map { $0.bestMatch(from: [.aqua, .darkAqua, .vibrantLight, .vibrantDark]).map { [.darkAqua, .vibrantDark].contains($0) } ?? true }
+            result.dark = switch (look.glass, look.color) {
+            case (true, _): nil
+            case (false, .white): true
+            case (false, .black): false
+            case (false, .menuBar): menuBarAppearance().map {
+                $0.bestMatch(from: [.aqua, .darkAqua, .vibrantLight, .vibrantDark]).map { [.darkAqua, .vibrantDark].contains($0) } ?? true
+            }
+            }
             withAnimation(.spring(duration: 0.55, bounce: 0.3)) { result.symbol = outcome == .typed ? "checkmark" : "doc.on.clipboard" }
         }
         hide(after: outcome == .empty ? 0.7 : outcome == .copied ? 1.2 : 1.0)
