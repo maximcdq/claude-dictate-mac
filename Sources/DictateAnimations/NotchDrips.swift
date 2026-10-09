@@ -355,10 +355,15 @@ final class NotchResult: ObservableObject {
     @Published var symbol: String?
     var glass = true
     var place = NotchResultPlace.right
+    // the menu bar's text is white or black with the wallpaper; nil under the notch, over the windows: the system's.
+    // Set outright: Liquid Glass would otherwise pick its own by what's behind it, black over a light wallpaper
+    // under a white menu bar
+    var dark: Bool?
 }
 
 private struct NotchResultView: View {
     @ObservedObject var result: NotchResult
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         // it grows out of the notch: from the side facing it, or down from its top
@@ -370,7 +375,7 @@ private struct NotchResultView: View {
         GlassEffectContainer {
             ZStack {
                 if let symbol = result.symbol {
-                    NotchResultSymbol(name: symbol)
+                    NotchResultSymbol(name: symbol, color: result.dark.map { $0 ? .white : .black } ?? .primary)
                         .frame(width: NotchIndicator.resultSize.width, height: NotchIndicator.resultSize.height)
                         .glassEffect(result.glass ? .regular : .identity, in: .capsule)
                         .glassEffectTransition(.materialize)
@@ -381,18 +386,20 @@ private struct NotchResultView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .environment(\.colorScheme, result.dark.map { $0 ? .dark : .light } ?? scheme)
     }
 }
 
 // drawn on stroke by stroke once it's in (symbols without drawing data just appear)
 private struct NotchResultSymbol: View {
     let name: String
+    let color: Color
     @State private var drawn = false
 
     var body: some View {
         Image(systemName: name)
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(.primary)
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(color)
             .symbolEffect(.drawOff, isActive: !drawn)
             .onAppear { DispatchQueue.main.async { drawn = true } }
     }
@@ -492,7 +499,9 @@ public final class NotchIndicator {
             case .right: resultView.frame = NSRect(x: notch.maxX + 16 + half - w / 2, y: Self.below, width: w, height: notch.height)
             case .below: resultView.frame = NSRect(x: notch.midX - w / 2, y: Self.below - 8 - size.height / 2 - h / 2, width: w, height: h)
             }
-            resultView.appearance = look.result == .below ? nil : menuBarAppearance()
+            let bar = look.result == .below ? nil : menuBarAppearance()
+            resultView.appearance = bar
+            result.dark = bar.map { $0.bestMatch(from: [.aqua, .darkAqua, .vibrantLight, .vibrantDark]).map { [.darkAqua, .vibrantDark].contains($0) } ?? true }
             withAnimation(.spring(duration: 0.55, bounce: 0.3)) { result.symbol = outcome == .typed ? "checkmark" : "doc.on.clipboard" }
         }
         hide(after: outcome == .empty ? 0.7 : outcome == .copied ? 1.2 : 1.0)
