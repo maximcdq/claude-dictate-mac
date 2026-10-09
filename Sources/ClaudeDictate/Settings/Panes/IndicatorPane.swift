@@ -57,7 +57,7 @@ struct IndicatorPane: View {
 // The drips at the notch with a voice that comes and goes, for trying the sliders.
 enum NotchPreview {
     private static var indicator: NotchIndicator?
-    private static var plays = 0  // each preview ends with the other result: a check, then a copy icon
+    private static var plays = 0  // each preview ends the other way: the green glow, then the clipboard icon
 
     static func play(_ settings: SettingsStore) {
         let indicator = indicator ?? NotchIndicator(meter: Voice()) { settings.notchLook }
