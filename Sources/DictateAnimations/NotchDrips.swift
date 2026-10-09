@@ -51,6 +51,7 @@ final class NotchDrips {
     private var smoothed: CGFloat = 0
     private var flow: CGFloat = 0  // the drips' own clock: runs faster with the voice
     private var reach: CGFloat = 0  // how far out the drips are, eased: 0 tucked in the notch, 1 out
+    private var shine: CGFloat = 0  // the glow with the voice, eased so the mic's ups and downs don't flicker it
     private var lastFrame = Date()
     private var startedAt = Date()  // hue clock
     private var modeAt = Date()
@@ -65,6 +66,7 @@ final class NotchDrips {
         mode = .live
         smoothed = 0
         reach = 0
+        shine = 0
         startedAt = Date()
         modeAt = Date()
         lastFrame = Date()
@@ -120,20 +122,24 @@ final class NotchDrips {
         reach += (out - reach) * (1 - exp(-dt * 8))
         flow += dt * (mode == .live ? 0.6 + 1.2 * smoothed : 0.4)
 
-        // the glow: the badge's color, faint in silence and bright with the voice, a slow pulse while the text
-        // finishes, a flash when it lands, soft coral when nothing came
+        // the glow: the badge's color. As the key goes down it flares up at once and settles, as Siri does, to a
+        // faint glow that waits for the voice and brightens with it (the mic's first moments of noise hide under the
+        // flare). At the end it just dims and fades out; when nothing came it turns soft coral first, as the badge does.
         let hue = Palette.color(at: CGFloat(now.timeIntervalSince(startedAt)))
         var color = hue
-        var glow: CGFloat
+        let live = CGFloat(now.timeIntervalSince(startedAt))
+        let flare = mode == .live ? (live < 0.12 ? Easing.smoothstep(live / 0.12) : exp(-(live - 0.12) / 0.32)) : 0
+        var rest: CGFloat
         switch mode {
-        case .off: glow = 0
-        case .live: glow = 0.25 + 0.75 * speech
-        case .processing: glow = 0.3 + 0.4 * Easing.pulse(since, period: 1.2)
-        case .typed, .copied: glow = 0.55 + 0.45 * max(1 - since / 0.5, 0)
+        case .off: rest = 0
+        case .live: rest = 0.25 + 0.75 * speech * Easing.smoothstep(min(max((live - 0.25) / 0.3, 0), 1))
+        case .processing, .typed, .copied: rest = 0.25
         case .empty:
             color = hue.blended(withFraction: Easing.smoothstep(min(since / 0.25, 1)), of: Palette.nothing)!
-            glow = 0.7
+            rest = 0.8
         }
+        shine += (rest - shine) * (1 - exp(-dt * (rest > shine ? 14 : 5)))
+        var glow = max(flare, shine)
         glow *= (1 - leaving) * min(look.glow * 1.4, 1)
         let rgb = color.usingColorSpace(.sRGB) ?? color
 
@@ -142,7 +148,8 @@ final class NotchDrips {
         (u[3], u[4], u[5], u[6]) = (Float(notch.minX), Float(notch.minY), Float(notch.maxX), Float(notch.maxY))
         (u[7], u[8], u[9]) = (Float(rgb.redComponent), Float(rgb.greenComponent), Float(rgb.blueComponent))
         u[10] = Float(glow)
-        u[11] = Float(2 + 12 * look.glow)  // how far the glow reaches, in points
+        // how far the glow reaches, in points: further out in the flare
+        u[11] = Float((2 + 12 * look.glow) * (1 + 0.6 * flare))
         u[12] = Float(2 + 6 * look.blend)  // the fillet where a drip leaves the notch
         u[13] = Float(0.5 + 9 * look.blend)  // how much neighboring drips melt together
 
@@ -446,7 +453,7 @@ public final class NotchIndicator {
     }
 
     // the text landed in the field (a check) or in the clipboard (a clipboard) beside the notch, or nothing came
-    // (soft coral); then the drips draw back in and it all fades
+    // (the glow turns soft coral); then the drips draw back in and it all fades
     public func done(_ outcome: Outcome) {
         switch outcome {
         case .typed: drips.set(.typed)
@@ -457,14 +464,14 @@ public final class NotchIndicator {
             let look = look(), notch = drips.notch
             result.glass = look.glass
             result.onLeft = look.resultOnLeft
-            // the capsule 8 pt off the notch, in a view with room round it for the glass's rim and the spring
+            // the capsule 16 pt off the notch, in a view with room round it for the glass's rim and the spring
             let w = Self.resultSize.width + 24
-            let center = look.resultOnLeft ? notch.minX - 8 - Self.resultSize.width / 2 : notch.maxX + 8 + Self.resultSize.width / 2
+            let center = look.resultOnLeft ? notch.minX - 16 - Self.resultSize.width / 2 : notch.maxX + 16 + Self.resultSize.width / 2
             resultView.frame = NSRect(x: center - w / 2, y: Self.below, width: w, height: notch.height)
             resultView.appearance = menuBarAppearance()
             withAnimation(.spring(duration: 0.55, bounce: 0.3)) { result.symbol = outcome == .typed ? "checkmark" : "doc.on.clipboard" }
         }
-        hide(after: outcome == .empty ? 0.5 : outcome == .copied ? 1.2 : 1.0)
+        hide(after: outcome == .empty ? 0.7 : outcome == .copied ? 1.2 : 1.0)
     }
 
     private func hide(after delay: TimeInterval) {
