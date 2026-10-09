@@ -13,7 +13,7 @@ import SwiftUI
 // The notch itself is hardware: the black drawn inside it doesn't show, the drips seem to come out of it.
 
 // How the drips look, from the settings, read every frame so the sliders show live: `drips` off leaves only the
-// glow; `length` and `width` scale the drips (1 is the default, small); `count` how many; `blend` 0...1 how much
+// glow; `length` and `width` scale the drips (1 small, 2 the app's default); `count` how many; `blend` 0...1 how much
 // they melt into each other and the notch; `glow` 0...1.5 the glow's strength and reach, 0 none; the result icon
 // sits on Liquid Glass (`glass`), or bare in `color`, and comes out of the notch's left or right side or below it
 // (`result`).

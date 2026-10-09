@@ -11,11 +11,11 @@ extension Setting {
     // the notch drips: on or just the glow; length and width (1 small, up to 2), how many, how much they melt
     // together 0...1, the glow 0...1.5 (0 none)
     static var drips: Setting<Bool> { .init("drips", default: false) }
-    static var dripLength: Setting<Double> { .init("dripLength", default: 1) }
-    static var dripWidth: Setting<Double> { .init("dripWidth", default: 1) }
-    static var dripCount: Setting<Double> { .init("dripCount", default: 5) }
-    static var dripBlend: Setting<Double> { .init("dripBlend", default: 0.5) }
-    static var dripGlow: Setting<Double> { .init("dripGlow", default: 0.5) }
+    static var dripLength: Setting<Double> { .init("dripLength", default: 2) }
+    static var dripWidth: Setting<Double> { .init("dripWidth", default: 2) }
+    static var dripCount: Setting<Double> { .init("dripCount", default: 6) }
+    static var dripBlend: Setting<Double> { .init("dripBlend", default: 1) }
+    static var dripGlow: Setting<Double> { .init("dripGlow", default: 1) }
     // the result icon by the notch: on Liquid Glass or bare (white, black or like the menu bar), on the notch's
     // right or left or below it
     static var resultGlass: Setting<Bool> { .init("resultGlass", default: true) }
