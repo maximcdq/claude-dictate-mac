@@ -5,10 +5,12 @@ import DictateCore
 // observe it where the app reacts to it (`settings.observe(.name) { … }`), or just read `settings[.name]` when needed.
 extension Setting {
     static var hotkey: Setting<Hotkey> { .init("hotkey", default: .fn) }
-    static var indicator: Setting<IndicatorStyle> { .init("indicator", default: .badge) }
+    // stored as "indicatorStyle" since the notch became the default in 0.4: the old "indicator" key is left behind,
+    // so every install moves to the notch once and can pick the badge or the caret again
+    static var indicator: Setting<IndicatorStyle> { .init("indicatorStyle", default: .notch) }
     // the notch drips: on or just the glow; length and width (1 small, up to 2), how many, how much they melt
     // together 0...1, the glow 0...1 (0 none)
-    static var drips: Setting<Bool> { .init("drips", default: true) }
+    static var drips: Setting<Bool> { .init("drips", default: false) }
     static var dripLength: Setting<Double> { .init("dripLength", default: 1) }
     static var dripWidth: Setting<Double> { .init("dripWidth", default: 1) }
     static var dripCount: Setting<Double> { .init("dripCount", default: 5) }
@@ -21,6 +23,8 @@ extension Setting {
     // pause music and videos while dictating, play them on afterwards
     static var pauseMedia: Setting<Bool> { .init("pauseMedia", default: true) }
     static var autoUpdate: Setting<Bool> { .init("autoUpdate", default: true) }
+    // stay in the Dock with Settings closed; off, the app shows in the Dock only while Settings is open
+    static var keepInDock: Setting<Bool> { .init("keepInDock", default: false) }
 }
 
 extension SettingsStore {

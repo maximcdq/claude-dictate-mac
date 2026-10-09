@@ -141,14 +141,17 @@ final class NotchDrips {
 
         // the drop with the result flows out of the notch's right side, springs into place and draws back in
         if mode == .typed || mode == .copied {
-            let r = min(11, (notch.height - 8) / 2)
-            let flowOut = Easing.pop(min(since / 0.35, 1)) * (1 - leaving)
-            u[14] = Float(notch.maxX - r - 4 + (2 * r + 2) * flowOut)  // out to just past the notch, still joined to it
+            // as big as the menu bar beside the notch allows, a little way out, a liquid neck back to the notch
+            let r = min(14, notch.height * 0.42)
+            let flowOut = Easing.pop(min(since / 0.4, 1)) * (1 - leaving)
+            u[14] = Float(notch.maxX - r - 4 + (2 * r + 12) * flowOut)
             u[15] = Float(notch.midY)
             u[16] = Float(r)
             u[17] = Float(mode == .typed ? 1 : 2)
-            u[18] = Float(min(max((since - 0.15) / 0.28, 0), 1))  // the check draws stroke by stroke
-            u[19] = Float(Easing.pop(min(max((since - 0.1) / 0.3, 0), 1)) * r / 11)
+            // the icon rides in from the notch's side: the check draws stroke by stroke, the copy's back sheet
+            // slides out from behind the front one
+            u[18] = Float(min(max((since - 0.15) / 0.3, 0), 1))
+            u[19] = Float(Easing.pop(min(max((since - 0.1) / 0.3, 0), 1)) * r / 10)
             u[20] = Float(min(max((since - 0.1) / 0.1, 0), 1) * (1 - leaving))
         }
 
@@ -197,7 +200,7 @@ final class NotchShader {
 
     // Distances in points, top-left origin. u: [2] scale, [3...6] notch minX minY maxX maxY, [7...9] glow color,
     // [10] glow strength, [11] glow reach, [12] notch fillet, [13] drip fillet, [14...16] result drop center x y and
-    // radius (0: none), [17] icon 1 check 2 copy, [18] check progress, [19] icon scale, [20] icon alpha,
+    // radius (0: none), [17] icon 1 check 2 copy, [18] icon progress, [19] icon scale, [20] icon alpha,
     // [21] drip count, [22...] per drip: x, neck y, bulb y, neck radius, bulb radius.
     static let source = """
     #include <metal_stdlib>
@@ -262,8 +265,13 @@ final class NotchShader {
         float r = u[16];
         if (r > 0.0) {
             float2 c = float2(u[14], u[15]);
-            d = smin(d, length(p - c) - r, 8.0);
+            // the notch itself swells out to the right, nearly as tall as the drop, and rounds into it, with soft
+            // fillets where it leaves the notch
+            float2 from = float2(notch.z - 24.0, c.y);
+            float body = roundedBox(p, (from + c) * 0.5, float2(max(c.x - from.x, 0.0) * 0.5, r * 0.82), r * 0.82);
+            d = smin(d, smin(body, length(p - c) - r, 3.0), 5.0);
             float s = max(u[19], 1e-3);
+            c.x -= 6.0 * (1.0 - smoothstep(0.0, 1.0, u[18]));
             float stroke = 1e5;
             if (u[17] < 1.5) {
                 // the badge's check, drawn from its left tip down and up to the right
@@ -276,9 +284,10 @@ final class NotchShader {
                     stroke -= 1.25 * s;
                 }
             } else {
-                // two sheets, the back one showing only past the front one's edge
+                // two sheets, the back one sliding out up-right and showing only past the front one's edge
+                float slide = smoothstep(0.0, 1.0, u[18]);
                 float front = roundedBox(p, c + float2(-1.4, 1.4) * s, float2(3.4, 4.2) * s, 1.5 * s);
-                float back = roundedBox(p, c + float2(1.4, -1.4) * s, float2(3.4, 4.2) * s, 1.5 * s);
+                float back = roundedBox(p, c + float2(-1.4 + 2.8 * slide, 1.4 - 2.8 * slide) * s, float2(3.4, 4.2) * s, 1.5 * s);
                 stroke = abs(front) - 0.7 * s;
                 if (front > 1.4 * s) stroke = min(stroke, abs(back) - 0.7 * s);
             }

@@ -31,11 +31,25 @@ updater.onInstalled = { _ in relaunch(cleanup: shutDown) }
 updater.setAutomatic(settings[.autoUpdate])
 settings.observe(.autoUpdate) { updater.setAutomatic($0) }
 
+// In the Dock while Settings is open (or always, with "Keep in the Dock"), in the background otherwise.
+func updateDockIcon() {
+    let inDock = settings[.keepInDock] || settingsWindow?.window?.isVisible == true
+    app.setActivationPolicy(inDock ? .regular : .accessory)
+}
+settings.observe(.keepInDock) { _ in updateDockIcon() }
+
 var settingsWindow: SettingsWindow?
 func showSettings() {
-    if settingsWindow == nil { settingsWindow = SettingsWindow(settings: settings, updates: updates) }
+    if settingsWindow == nil {
+        settingsWindow = SettingsWindow(settings: settings, updates: updates)
+        settingsWindow?.onClose = { DispatchQueue.main.async { updateDockIcon() } }  // once the window is gone
+    }
+    app.setActivationPolicy(.regular)
     settingsWindow?.present()
 }
+
+let appDelegate = AppDelegate(openSettings: showSettings)
+app.delegate = appDelegate
 
 let statusMenu = StatusMenu(settings: settings, openSettings: showSettings, checkForUpdates: {
     showSettings()
@@ -59,4 +73,9 @@ log("ClaudeDictate \(updater.currentVersion) starting")
 Mic.restore()
 hotkeyTap.install()
 dictation.start()
+updateDockIcon()
+// opened by hand (not at login by launchd, nor restarting into an update): straight to Settings
+if ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"] != appLabel, !CommandLine.arguments.contains("--relaunched") {
+    DispatchQueue.main.async { showSettings() }
+}
 app.run()

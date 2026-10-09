@@ -12,7 +12,9 @@ struct SettingsPane {
 }
 
 // The settings window: a toolbar of tabs, each a grouped form, as in System Settings-era macOS apps.
-final class SettingsWindow: NSWindowController {
+final class SettingsWindow: NSWindowController, NSWindowDelegate {
+    var onClose: () -> Void = {}
+
     init(settings: SettingsStore, updates: UpdateStatus) {
         let panes = [
             SettingsPane(title: "General", symbol: "gearshape", view: AnyView(GeneralPane())),
@@ -40,6 +42,11 @@ final class SettingsWindow: NSWindowController {
         window.toolbarStyle = .preference
         window.isReleasedWhenClosed = false
         super.init(window: window)
+        window.delegate = self
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        onClose()
     }
 
     required init?(coder: NSCoder) { fatalError("not from a nib") }
