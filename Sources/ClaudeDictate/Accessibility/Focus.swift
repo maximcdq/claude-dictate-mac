@@ -198,3 +198,30 @@ func inWebArea(_ element: AXUIElement) -> Bool {
     }
     return false
 }
+
+// Whether the text typed at the caret needs a space before it, as macOS's own dictation does: right after a word or a
+// sentence (the previous dictation, or text typed by hand) yes; at the start of the field, after a space or a line
+// break, or just inside an opening bracket or quote no. The caret's start: a selection gets replaced, the character
+// before it stays. Apps that don't tell get no space.
+func needsSpaceBefore(_ element: AXUIElement) -> Bool {
+    var rangeRef: CFTypeRef?
+    var range = CFRange()
+    guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+          let rangeRef, AXValueGetValue(rangeRef as! AXValue, .cfRange, &range), range.location > 0 else { return false }
+    var before: String?
+    var query = CFRange(location: range.location - 1, length: 1)
+    var out: CFTypeRef?
+    if let q = AXValueCreate(.cfRange, &query),
+       AXUIElementCopyParameterizedAttributeValue(element, kAXStringForRangeParameterizedAttribute as CFString, q, &out) == .success {
+        before = out as? String
+    }
+    if before?.isEmpty ?? true {  // some apps only give their whole text; AX ranges count UTF-16 units, as NSString does
+        var value: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value)
+        if let text = value as? NSString, range.location <= text.length {
+            before = text.substring(with: NSRange(location: range.location - 1, length: 1))
+        }
+    }
+    guard let c = before?.unicodeScalars.last else { return false }
+    return !CharacterSet.whitespacesAndNewlines.contains(c) && !"([{«„“‘".unicodeScalars.contains(c)
+}
