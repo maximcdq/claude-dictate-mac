@@ -42,9 +42,11 @@ final class Dictation {
 
     init(settings: SettingsStore) {
         self.settings = settings
-        indicator = BadgeIndicator(meter: LevelMeter())
-        caret = CaretIndicator(meter: LevelMeter(), caretRect: caretRect)
-        notch = NotchIndicator(meter: LevelMeter()) { settings.notchLook }
+        // the meter records from the mic the dictation uses: the built-in one, or the default input
+        let input = { settings[.builtInMic] ? Mic.builtIn : nil }
+        indicator = BadgeIndicator(meter: LevelMeter(input: input))
+        caret = CaretIndicator(meter: LevelMeter(input: input), caretRect: caretRect)
+        notch = NotchIndicator(meter: LevelMeter(input: input)) { settings.notchLook }
         notch.menuBarAppearance = { StatusMenu.menuBarAppearance }
         pty.language = { settings[.language] }
         settings.observe(.language) { [weak self] _ in self?.restartClaude() }
@@ -101,6 +103,7 @@ final class Dictation {
         typed = []
         target = focus == .field ? field : nil
         beganAt = Date()
+        if settings[.builtInMic] { Mic.useBuiltIn() }
         if settings[.pauseMedia] { NowPlaying.pauseIfPlaying() }
         style = settings[.indicator]
         if style == .notch, !notch.show() {
@@ -270,6 +273,7 @@ final class Dictation {
     private func finish(text: String) {
         try? "clear".write(toFile: Paths.control, atomically: true, encoding: .utf8)
         phase = .idle
+        Mic.restore()
         NowPlaying.resume()
         if restartPending { restartClaude() }
         log("done: \(text.count) chars\(cancelled ? ", cancelled" : "")\(detached ? (target == nil ? ", to the clipboard" : ", focus moved, to the clipboard") : "")")

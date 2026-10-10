@@ -18,6 +18,7 @@ let dictation = Dictation(settings: settings)
 let hotkeyTap = HotkeyTap(dictation: dictation, settings: settings)
 
 func shutDown() {
+    Mic.restore()
     NowPlaying.resume()
     dictation.pty.stop()
 }
@@ -69,6 +70,7 @@ NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActiva
                                                   queue: .main) { _ in enableAppAccessibility() }
 
 log("ClaudeDictate \(updater.currentVersion) starting")
+Mic.restore()
 hotkeyTap.install()
 dictation.start()
 updateDockIcon()
