@@ -122,8 +122,8 @@ func role(of element: AXUIElement?) -> String {
 
 // Whether the focused element takes typed text: it has a text caret (a selected text range). The desktop, a file
 // list, a button have none, so the text goes to the clipboard.
-// Whether the element is in sight: its center inside a window of its app that the window server shows, and on a
-// screen. A hidden window keeps its app and field focused (iTerm's hotkey window once it slides away, minimized windows),
+// Whether the element is in sight: its part inside a window of its app that the window server shows lies on a screen
+// (judged by that part's center). A hidden window keeps its app and field focused (iTerm's hotkey window once it slides away, minimized windows),
 // and Show Desktop slides the windows off the edges: text typed there would land out of sight. An element that reports
 // no frame counts as visible when its app shows any window.
 func visibleWindows(of pid: pid_t) -> [CGRect] {
@@ -143,11 +143,16 @@ func onScreen(_ element: AXUIElement) -> Bool {
     var p = CGPoint.zero, s = CGSize.zero
     AXValueGetValue(pos as! AXValue, .cgPoint, &p)
     AXValueGetValue(size as! AXValue, .cgSize, &s)
+    // A terminal reports its whole scrollback as the text area (iTerm: thousands of points tall, reaching far above
+    // the window), so its center leaves the window as the history grows. What counts is the part inside a window.
+    let frame = CGRect(origin: p, size: s)
     // accessibility and the window server measure from the top-left of the primary screen, AppKit from its bottom-left
-    let center = CGPoint(x: p.x + s.width / 2, y: p.y + s.height / 2)
     let primary = NSScreen.screens.first?.frame.height ?? 0
-    return windows.contains { $0.contains(center) }
-        && NSScreen.screens.contains { $0.frame.contains(CGPoint(x: center.x, y: primary - center.y)) }
+    return windows.contains { window in
+        let shown = window.intersection(frame)
+        guard !shown.isNull, !shown.isEmpty else { return false }
+        return NSScreen.screens.contains { $0.frame.contains(CGPoint(x: shown.midX, y: primary - shown.midY)) }
+    }
 }
 
 // Where the text goes. Like any dictation app it is typed into whatever has focus; only when macOS says for sure that
