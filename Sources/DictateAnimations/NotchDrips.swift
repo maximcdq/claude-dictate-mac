@@ -17,9 +17,9 @@ import SwiftUI
 // they melt into each other and the notch; `glow` 0...1.5 the glow's strength and reach, 0 none; the result icon
 // sits on Liquid Glass (`glass`), or bare in `color`, and comes out of the notch's left or right side or below it
 // (`result`). `waves` (in development) ripples the notch's whole edge with the voice: `waveHeight` and `waveSpeed`
-// 0.5...2, smooth or Venom-like spikes (`waveStyle`).
+// 0.5...2, smooth, Venom-like tendrils or iTerm's green progress bar running round the edge (`waveStyle`).
 public enum NotchWaveStyle: String, CaseIterable, Identifiable {
-    case calm, venom
+    case calm, venom, progress
 
     public var id: String { rawValue }
 
@@ -27,6 +27,7 @@ public enum NotchWaveStyle: String, CaseIterable, Identifiable {
         switch self {
         case .calm: "Waves"
         case .venom: "Venom"
+        case .progress: "Progress bar"
         }
     }
 }
@@ -226,9 +227,11 @@ final class NotchDrips {
         }
         var glow = max(flare, shine)
         glow *= (1 - leaving) * (min(look.glow * 1.4, 1) + 0.6 * max(look.glow - 1, 0))  // past 1 brighter still
+        // iTerm's progress bar is green, and so is its glow
+        if look.waves, look.waveStyle == .progress, mode == .live || mode == .processing { color = Palette.typed }
         let rgb = color.usingColorSpace(.sRGB) ?? color
 
-        var u = [Float](repeating: 0, count: 18 + 5 * Self.maxDrips)
+        var u = [Float](repeating: 0, count: 19 + 5 * Self.maxDrips)
         u[2] = Float(scale)
         (u[3], u[4], u[5], u[6]) = (Float(notch.minX), Float(notch.minY), Float(notch.maxX), Float(notch.maxY))
         (u[7], u[8], u[9]) = (Float(rgb.redComponent), Float(rgb.greenComponent), Float(rgb.blueComponent))
@@ -258,7 +261,12 @@ final class NotchDrips {
         }
         u[15 + 5 * Self.maxDrips] = Float(5 * look.waveHeight * swell)  // the waves' height in points
         u[16 + 5 * Self.maxDrips] = Float(tide)
-        u[17 + 5 * Self.maxDrips] = look.waveStyle == .venom ? 1 : 0
+        u[17 + 5 * Self.maxDrips] = switch look.waveStyle {
+        case .calm: 0
+        case .venom: 1
+        case .progress: 2
+        }
+        u[18 + 5 * Self.maxDrips] = Float(swell)
         return u
     }
 }
@@ -286,7 +294,8 @@ final class NotchShader {
 
     // Distances in points, top-left origin. u: [2] scale, [3...6] notch minX minY maxX maxY, [7...9] glow color,
     // [10] glow strength, [11] glow reach, [12] notch fillet, [13] drip fillet, [14] drip count, [15...] per drip:
-    // x, neck y, bulb y, neck radius, bulb radius; after them the waves' height, clock and style (1 Venom).
+    // x, neck y, bulb y, neck radius, bulb radius; after them the waves' height, clock, style (1 Venom,
+    // 2 progress bar) and how far they're up 0...1.
     static let source = """
     #define WAVES \(15 + 5 * NotchDrips.maxDrips)
     #include <metal_stdlib>
@@ -340,7 +349,9 @@ final class NotchShader {
             float side = p.x < lo.x ? -1.0 : (p.x > hi.x ? 1.0 : 0.0);
             float s = (c.x - lo.x) + side * (hi.y - c.y);
             float t = u[WAVES + 1];
-            if (u[WAVES + 2] > 0.5) {
+            if (u[WAVES + 2] > 1.5) {
+                // the progress bar: no waves, it's drawn round the edge below
+            } else if (u[WAVES + 2] > 0.5) {
                 // Venom: the edge swells like goo, and a tendril every few points shoots out along the edge's normal
                 // and draws back at its own pace, wide at the base, pointed at the tip, melted into the notch
                 d -= height * (0.25 + 0.2 * sin(s * 0.09 + t * 0.7));
@@ -378,7 +389,23 @@ final class NotchShader {
         float fill = clamp(0.5 - d * scale, 0.0, 1.0);
         float glow = u[10] * exp(-max(d, 0.0) / max(u[11], 0.01)) * (1.0 - fill);
         float3 rgb = float3(u[7], u[8], u[9]) * glow;
-        return float4(rgb, fill + glow);
+        float alpha = fill + glow;
+
+        // iTerm's progress bar: a thin green line hugging the edge, a brighter stretch sweeping round it
+        if (height > 0.0 && u[WAVES + 2] > 1.5) {
+            float2 c = clamp(p, lo, hi);
+            float side = p.x < lo.x ? -1.0 : (p.x > hi.x ? 1.0 : 0.0);
+            float s = (c.x - lo.x) + side * (hi.y - c.y);
+            float width = 1.0 + 0.3 * height;
+            float bar = clamp(0.5 - (abs(d - width * 0.5) - width * 0.5) * scale, 0.0, 1.0) * u[WAVES + 3];
+            float around = (hi.x - lo.x) + 2.0 * hi.y;
+            float sweep = fract(u[WAVES + 1] * 0.15) * (around + 80.0) - 40.0 - hi.y;
+            float shine = exp(-pow((s - sweep) / 22.0, 2.0));
+            float3 green = float3(0.30, 0.85, 0.45) * (0.6 + 0.4 * shine) + float3(0.5) * shine * 0.5;
+            rgb = green * bar + rgb * (1.0 - bar);
+            alpha = bar + alpha * (1.0 - bar);
+        }
+        return float4(rgb, alpha);
     }
     """
 }
