@@ -6,8 +6,8 @@ import SwiftUI
 // MARK: - Notch drips: black liquid seeping from the MacBook's notch while recording
 // A few small drips hang from the notch's lower edge and lengthen with the voice; a glow in the badge's colors runs
 // round the notch and the drips, faint in silence, brighter with the voice. At the end the glow turns soft green (the
-// text is typed) or soft coral (nothing came) and fades out; text in the clipboard brings out a copy icon by the
-// notch instead.
+// text is typed, with a green check by the notch) or soft coral (nothing came) and fades out; text in the clipboard
+// brings out a copy icon instead.
 // It is one signed distance field drawn by a Metal shader on every display refresh (120 Hz on ProMotion): the notch,
 // the drips are smooth-unioned, so they merge like liquid, with crisp antialiased edges at any size.
 // The notch itself is hardware: the black drawn inside it doesn't show, the drips seem to come out of it.
@@ -380,10 +380,9 @@ private final class NotchView: NSView {
     }
 }
 
-// The result under the notch or beside it: the system's check or clipboard symbol on Liquid Glass as the system
-// draws it, or bare in white, black or the menu bar's color
-// (dark on a light menu bar, white on a dark one), on a Liquid Glass capsule or bare. It springs out of the notch's
-// side, sharpening out of a blur as the check draws itself, and melts back into a blur.
+// The result under the notch or beside it: the system's check (green, on glass tinted a touch green) or clipboard
+// symbol, on Liquid Glass as the system draws it, or bare in white, black or the menu bar's color. It springs out
+// of the notch, sharpening out of a blur as the symbol draws itself, and melts back into a blur.
 final class NotchResult: ObservableObject {
     @Published var symbol: String?
     var glass = true
@@ -391,6 +390,7 @@ final class NotchResult: ObservableObject {
     // the bare icon's color: white (true) or black, set outright; nil on Liquid Glass, which picks it by what's
     // behind it, as the system's own glass controls do, in the system's light or dark glass
     var dark: Bool?
+    var tint: Color?  // the check's green, on the symbol and faintly on the glass
 }
 
 private struct NotchResultView: View {
@@ -407,9 +407,9 @@ private struct NotchResultView: View {
         GlassEffectContainer {
             ZStack {
                 if let symbol = result.symbol {
-                    NotchResultSymbol(name: symbol, color: result.dark.map { $0 ? .white : .black } ?? .primary)
+                    NotchResultSymbol(name: symbol, color: result.tint ?? result.dark.map { $0 ? .white : .black } ?? .primary)
                         .frame(width: NotchIndicator.resultSize.width, height: NotchIndicator.resultSize.height)
-                        .glassEffect(result.glass ? .regular : .identity, in: .capsule)
+                        .glassEffect(result.glass ? .regular.tint(result.tint?.opacity(0.18)) : .identity, in: .capsule)
                         .glassEffectTransition(.materialize)
                         .transition(AnyTransition(.blurReplace)
                             .combined(with: .scale(scale: 0.5, anchor: anchor))
@@ -521,15 +521,15 @@ public final class NotchIndicator {
         if drips.mode == .live { drips.set(.processing) }
     }
 
-    // the text landed in the field (the glow turns soft green) or in the clipboard (a clipboard icon by the notch),
-    // or nothing came (soft coral); then the drips draw back in and it all fades
+    // the text landed in the field (the glow turns soft green, a green check comes out) or in the clipboard (a
+    // clipboard icon), or nothing came (soft coral); then the drips draw back in and it all fades
     public func done(_ outcome: Outcome) {
         switch outcome {
         case .typed: drips.set(.typed)
         case .copied: drips.set(.copied)
         case .empty: drips.set(.empty)
         }
-        if outcome == .copied {
+        if outcome != .empty {
             let look = look(), notch = drips.notch
             result.glass = look.glass
             result.place = look.result
@@ -550,7 +550,8 @@ public final class NotchIndicator {
                 $0.bestMatch(from: [.aqua, .darkAqua, .vibrantLight, .vibrantDark]).map { [.darkAqua, .vibrantDark].contains($0) } ?? true
             }
             }
-            withAnimation(.spring(duration: 0.55, bounce: 0.3)) { result.symbol = "doc.on.clipboard" }
+            result.tint = outcome == .typed ? Color(nsColor: Palette.typed) : nil
+            withAnimation(.spring(duration: 0.55, bounce: 0.3)) { result.symbol = outcome == .typed ? "checkmark" : "doc.on.clipboard" }
         }
         hide(after: outcome == .copied ? 1.2 : NotchDrips.ending.swell + NotchDrips.ending.fade)
     }

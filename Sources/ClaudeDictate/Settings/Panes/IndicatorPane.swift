@@ -44,7 +44,7 @@ struct IndicatorPane: View {
                 } header: {
                     Text("Notch")
                 } footer: {
-                    Text("Without drips only the glow shows. At the end the glow turns green when the text is typed, coral when nothing came; text that went to the clipboard brings out a clipboard icon, on Liquid Glass in the glass's own color or bare in the color you pick. Preview plays a few seconds of a made-up voice at the notch, then the result; the sliders change it as it plays.")
+                    Text("Without drips only the glow shows. At the end the glow turns green and a green check comes out when the text is typed, the glow turns coral when nothing came, and text that went to the clipboard brings out a clipboard icon, on Liquid Glass in the glass's own color or bare in the color you pick. Preview plays a few seconds of a made-up voice at the notch, then the result; the sliders change it as it plays.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -57,7 +57,7 @@ struct IndicatorPane: View {
 // The drips at the notch with a voice that comes and goes, for trying the sliders.
 enum NotchPreview {
     private static var indicator: NotchIndicator?
-    private static var plays = 0  // each preview ends the other way: the green glow, then the clipboard icon
+    private static var plays = 0  // each preview ends the other way: the green check, then the clipboard icon
 
     static func play(_ settings: SettingsStore) {
         let indicator = indicator ?? NotchIndicator(meter: Voice()) { settings.notchLook }
