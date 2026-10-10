@@ -105,6 +105,14 @@ it alone starts a dictation.
   *Press 🌐 key to* "Do Nothing", or macOS will open the emoji picker / its own dictation.
 - **`Voice mode requires a Claude.ai account`** in the log: run `claude` in a terminal and `/login`.
 - **No permission prompts / typing doesn't work**: remove ClaudeDictate from Accessibility, run `./install.sh` again.
+- **ClaudeDictate is not in the Accessibility list**: click *+* in System Settings → Privacy & Security →
+  Accessibility and pick `~/Applications/ClaudeDictate.app`, then turn it on. The app picks the permission up within a
+  few seconds, no restart needed.
+- **The badge animates but no text is typed**: the hidden session may be stuck on a Claude Code startup dialog the app
+  doesn't expect. One seen in practice is *Claude in Chrome extension detected*, shown when the Claude extension for
+  Chrome is installed. Run `claude` once in a terminal and get past any such dialogs; if the Chrome one keeps coming
+  back, add `"--no-chrome"` to the `claude` arguments in `Sources/main.swift` and run `./install.sh` again. The flag
+  only affects the hidden session.
 
 ## License
 
