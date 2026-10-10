@@ -25,11 +25,9 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate {
         let tabs = NSTabViewController()
         tabs.tabStyle = .toolbar
         for pane in panes {
-            let host = NSHostingController(rootView: pane.view
+            let host = NSHostingController(rootView: FittedPane(content: pane.view
                 .environmentObject(settings)
-                .environmentObject(updates)
-                .frame(width: 480)
-                .fixedSize())
+                .environmentObject(updates)))
             host.sizingOptions = [.preferredContentSize]
             host.title = pane.title  // the window takes the selected tab's title, as System Settings-era apps do
             let item = NSTabViewItem(viewController: host)
@@ -56,6 +54,20 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate {
         NSApp.activate()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+    }
+}
+
+// A pane as tall as its form, but no taller than the screen leaves room for: past that the form scrolls.
+private struct FittedPane<Content: View>: View {
+    let content: Content
+    @State private var height: CGFloat = 400
+
+    var body: some View {
+        content
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height + $0.contentInsets.top + $0.contentInsets.bottom } action: {
+                height = $1
+            }
+            .frame(width: 480, height: min(height, (NSScreen.main?.visibleFrame.height ?? 800) - 100))
     }
 }
 
