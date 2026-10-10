@@ -466,6 +466,7 @@ public final class NotchIndicator {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
+        panel.canHide = false  // shows with the app hidden too (Hide Others, ⌘H in Settings)
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.animationBehavior = .none
