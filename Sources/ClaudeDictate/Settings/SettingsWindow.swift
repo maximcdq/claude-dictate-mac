@@ -24,10 +24,11 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate {
         ]
         let tabs = NSTabViewController()
         tabs.tabStyle = .toolbar
-        for pane in panes {
+        let height = PaneHeight()
+        for (i, pane) in panes.enumerated() {
             let host = NSHostingController(rootView: FittedPane(content: pane.view
                 .environmentObject(settings)
-                .environmentObject(updates)))
+                .environmentObject(updates), height: height, measures: i == 0))
             host.sizingOptions = [.preferredContentSize]
             host.title = pane.title  // the window takes the selected tab's title, as System Settings-era apps do
             let item = NSTabViewItem(viewController: host)
@@ -57,17 +58,23 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate {
     }
 }
 
-// A pane as tall as its form, but no taller than the screen leaves room for: past that the form scrolls.
+// Every pane is as tall as the first one's form (General), so the window keeps its size from tab to tab; a longer
+// form scrolls. Never taller than the screen leaves room for.
+private final class PaneHeight: ObservableObject {
+    @Published var value: CGFloat = 320
+}
+
 private struct FittedPane<Content: View>: View {
     let content: Content
-    @State private var height: CGFloat = 400
+    @ObservedObject var height: PaneHeight
+    let measures: Bool
 
     var body: some View {
         content
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height + $0.contentInsets.top + $0.contentInsets.bottom } action: {
-                height = $1
+                if measures { height.value = $1 }
             }
-            .frame(width: 480, height: min(height, (NSScreen.main?.visibleFrame.height ?? 800) - 100))
+            .frame(width: 480, height: min(height.value, (NSScreen.main?.visibleFrame.height ?? 800) - 100))
     }
 }
 
