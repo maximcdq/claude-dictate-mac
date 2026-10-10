@@ -122,8 +122,8 @@ func role(of element: AXUIElement?) -> String {
 
 // Whether the focused element takes typed text: it has a text caret (a selected text range). The desktop, a file
 // list, a button have none, so the text goes to the clipboard.
-// Whether the element is in sight: its center inside a window of its app that the window server shows, and on a
-// screen. A hidden window keeps its app and field focused (iTerm's hotkey window once it slides away, minimized windows),
+// Whether the element is in sight: its part inside a window of its app that the window server shows lies on a screen
+// (judged by that part's center). A hidden window keeps its app and field focused (iTerm's hotkey window once it slides away, minimized windows),
 // and Show Desktop slides the windows off the edges: text typed there would land out of sight. An element that reports
 // no frame counts as visible when its app shows any window.
 func visibleWindows(of pid: pid_t) -> [CGRect] {
