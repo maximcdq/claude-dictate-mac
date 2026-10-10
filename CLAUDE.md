@@ -24,7 +24,7 @@ dependencies. Owner: maximcdq. Other people contribute through pull requests.
 | `Sources/DictateCore` | paths, log, `Version`, `Hotkey` model, the settings store (`Setting`, `SettingsStore`); no UI |
 | `Sources/DictateAnimations` | the indicators: `VoiceBadge`/`BadgeIndicator` (glass badge at the pointer), `CaretBar`/`CaretIndicator` (Claude Code's bar at the caret), `NotchDrips`/`NotchIndicator` (drips from the notch), `Easing`, `Palette`; mic level comes in through `LevelSource` |
 | `Sources/DictateUpdater` | self-update from GitHub releases: download, SHA-256 check, re-sign with the local identity, swap the bundle |
-| `Sources/ClaudeDictate` | the app: `Claude/` hidden session in a pty, `Audio/` mic switching and level meter, `Input/` hotkey event tap and synthetic typing, `Accessibility/` focus and caret lookup, `Dictation/` the state machine, `Settings/` keys and the settings window, `System/` login item and relaunch, `App/` menu bar |
+| `Sources/ClaudeDictate` | the app: `Claude/` hidden session in a pty, `Audio/` mic level meter and media pausing, `Input/` hotkey event tap and synthetic typing, `Accessibility/` focus and caret lookup, `Dictation/` the state machine, `Settings/` keys and the settings window, `System/` login item and relaunch, `App/` menu bar |
 | `mod/` | the Claude Code plugin inside the hidden session; shipped in the app bundle, copied to `~/Library/Application Support/ClaudeDictate/mod` at launch |
 | `scripts/` | `bundle.sh` (build the .app), `release.sh`, `make-icon.sh` (regenerate `Resources/AppIcon.icns`) |
 

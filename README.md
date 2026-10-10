@@ -15,7 +15,7 @@ key and it settles on the final transcript.
 - No text field? Speak anyway: the text lands in the clipboard.
 - **Esc** cancels and erases what this dictation typed.
 - Settings (menu bar icon → Settings…, or open the app again): the key, start at login, the Dock, dictation language,
-  built-in mic, indicator, automatic updates.
+  indicator, automatic updates.
 - Updates itself from GitHub releases and keeps its permissions.
 - Costs nothing extra: per [Claude Code docs](https://code.claude.com/docs/en/voice-dictation), transcription "does not
   consume Claude messages or tokens and does not count toward the limits shown in `/usage`". The helper session never
@@ -77,9 +77,6 @@ Like any dictation app, it types into whatever has focus, in any app. Only when 
 takes text (the desktop, a page with no field active, a hidden window, an app with no window in sight) does the final
 text go to the clipboard instead, with a copy icon on the badge. The same happens if focus moves to another field mid-dictation. Text that was typed
 into a field leaves the clipboard untouched.
-
-While dictating, the default input switches to the Mac's built-in mic so AirPods stay in high-quality audio mode; the
-previous input is restored afterwards (Settings → Dictation to turn that off).
 
 A modifier as the key (⌘, ⌥, ⌃) works like Fn: a tap or a shortcut (⌘C, ⌘Tab) passes through untouched, only holding
 it alone starts a dictation.
