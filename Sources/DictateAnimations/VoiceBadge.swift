@@ -245,6 +245,7 @@ public final class BadgeIndicator {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false  // a window shadow rims the glass in black
+        panel.canHide = false  // shows with the app hidden too (Hide Others, ⌘H in Settings)
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.animationBehavior = .none
