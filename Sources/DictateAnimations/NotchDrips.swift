@@ -447,7 +447,9 @@ public final class NotchIndicator {
     static let below: CGFloat = 110  // room under it for the longest drips
     private let drips: NotchDrips
     private let look: () -> NotchLook
-    private let panel: NSPanel
+    // made anew for each dictation: a panel kept from launch can end up tied to a full-screen Space that's gone (an app
+    // going in and out of full screen), and then never shows again
+    private var panel: NSPanel?
     private var view: NotchView?
     private let result = NotchResult()
     private let resultView: NSHostingView<NotchResultView>
@@ -461,7 +463,11 @@ public final class NotchIndicator {
         resultView = NSHostingView(rootView: NotchResultView(result: result))
         resultView.sizingOptions = []
         _ = NotchShader.shared  // start compiling now, so the first dictation finds it ready
-        panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+    }
+
+    private static func makePanel(_ frame: NSRect) -> NSPanel {
+        let panel = NSPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false
         panel.level = .statusBar
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -470,6 +476,7 @@ public final class NotchIndicator {
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.animationBehavior = .none
+        return panel
     }
 
     // the notch's screen: the one under the pointer, where the user looks (`anywhere`: any screen with a notch)
@@ -491,7 +498,10 @@ public final class NotchIndicator {
         let height = screen.safeAreaInsets.top
         let frame = NSRect(x: f.minX + left.width - Self.side, y: f.maxY - height - Self.below,
                            width: width + Self.side * 2, height: height + Self.below)
-        panel.setFrame(frame, display: false)
+        panel?.orderOut(nil)
+        panel?.contentView = nil
+        let panel = Self.makePanel(frame)
+        self.panel = panel
         drips.notch = CGRect(x: Self.side, y: 0, width: width, height: height)
         // the views live only while shown; the result sits in the menu bar just right of the notch
         let content = NSView(frame: NSRect(origin: .zero, size: frame.size))
@@ -562,8 +572,9 @@ public final class NotchIndicator {
             self.view?.stop()
             self.view = nil
             self.drips.off()
-            self.panel.orderOut(nil)
-            self.panel.contentView = nil
+            self.panel?.orderOut(nil)
+            self.panel?.contentView = nil
+            self.panel = nil
         }
     }
 }
