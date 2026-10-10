@@ -48,6 +48,15 @@ struct IndicatorPane: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+                if settings[.notchWaves] {
+                    Section("Waves (in development)") {
+                        Picker("Style", selection: settings.binding(.waveStyle)) {
+                            ForEach(NotchWaveStyle.allCases) { Text($0.title).tag($0) }
+                        }
+                        Slider(value: settings.binding(.waveHeight), in: 0.5...2) { Text("Height") }
+                        Slider(value: settings.binding(.waveSpeed), in: 0.5...2) { Text("Speed") }
+                    }
+                }
             }
         }
         .formStyle(.grouped)

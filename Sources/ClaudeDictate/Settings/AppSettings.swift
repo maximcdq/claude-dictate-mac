@@ -16,6 +16,12 @@ extension Setting {
     static var dripCount: Setting<Double> { .init("dripCount", default: 6) }
     static var dripBlend: Setting<Double> { .init("dripBlend", default: 1) }
     static var dripGlow: Setting<Double> { .init("dripGlow", default: 1) }
+    // in development, not in Settings: the notch's edge ripples with the voice
+    // (`defaults write local.claude-dictate notchWaves -bool true`)
+    static var notchWaves: Setting<Bool> { .init("notchWaves", default: false) }
+    static var waveHeight: Setting<Double> { .init("waveHeight", default: 1) }
+    static var waveSpeed: Setting<Double> { .init("waveSpeed", default: 1) }
+    static var waveStyle: Setting<NotchWaveStyle> { .init("waveStyle", default: .calm) }
     // the result icon by the notch: on Liquid Glass or bare (white, black or like the menu bar), on the notch's
     // right or left or below it
     static var resultGlass: Setting<Bool> { .init("resultGlass", default: true) }
@@ -36,7 +42,9 @@ extension SettingsStore {
     var notchLook: NotchLook {
         NotchLook(drips: self[.drips], length: self[.dripLength], width: self[.dripWidth],
                   count: Int(self[.dripCount].rounded()), blend: self[.dripBlend], glow: self[.dripGlow],
-                  glass: self[.resultGlass], result: self[.resultPlace], color: self[.resultColor])
+                  glass: self[.resultGlass], result: self[.resultPlace], color: self[.resultColor],
+                  waves: self[.notchWaves], waveHeight: self[.waveHeight], waveSpeed: self[.waveSpeed],
+                  waveStyle: self[.waveStyle])
     }
 }
 

@@ -16,7 +16,21 @@ import SwiftUI
 // glow; `length` and `width` scale the drips (1 small, 2 the app's default); `count` how many; `blend` 0...1 how much
 // they melt into each other and the notch; `glow` 0...1.5 the glow's strength and reach, 0 none; the result icon
 // sits on Liquid Glass (`glass`), or bare in `color`, and comes out of the notch's left or right side or below it
-// (`result`).
+// (`result`). `waves` (in development) ripples the notch's whole edge with the voice: `waveHeight` and `waveSpeed`
+// 0.5...2, smooth or Venom-like spikes (`waveStyle`).
+public enum NotchWaveStyle: String, CaseIterable, Identifiable {
+    case calm, venom
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .calm: "Waves"
+        case .venom: "Venom"
+        }
+    }
+}
+
 public enum NotchResultPlace: String, CaseIterable, Identifiable {
     case left, right, below
 
@@ -56,9 +70,14 @@ public struct NotchLook {
     public var glass: Bool
     public var result: NotchResultPlace
     public var color: NotchResultColor
+    public var waves: Bool
+    public var waveHeight: CGFloat
+    public var waveSpeed: CGFloat
+    public var waveStyle: NotchWaveStyle
 
     public init(drips: Bool, length: CGFloat, width: CGFloat, count: Int, blend: CGFloat, glow: CGFloat,
-                glass: Bool, result: NotchResultPlace, color: NotchResultColor = .menuBar) {
+                glass: Bool, result: NotchResultPlace, color: NotchResultColor = .menuBar, waves: Bool = false,
+                waveHeight: CGFloat = 1, waveSpeed: CGFloat = 1, waveStyle: NotchWaveStyle = .calm) {
         self.drips = drips
         self.length = length
         self.width = width
@@ -68,6 +87,10 @@ public struct NotchLook {
         self.glass = glass
         self.result = result
         self.color = color
+        self.waves = waves
+        self.waveHeight = waveHeight
+        self.waveSpeed = waveSpeed
+        self.waveStyle = waveStyle
     }
 }
 
@@ -86,6 +109,8 @@ final class NotchDrips {
     private var flow: CGFloat = 0  // the drips' own clock: runs faster with the voice
     private var reach: CGFloat = 0  // how far out the drips are, eased: 0 tucked in the notch, 1 out
     private var shine: CGFloat = 0  // the glow with the voice, eased so the mic's ups and downs don't flicker it
+    private var swell: CGFloat = 0  // how high the waves run round the notch's edge, eased
+    private var tide: CGFloat = 0  // the waves' clock: they run faster with the voice
     private var lastFrame = Date()
     private var startedAt = Date()  // hue clock
     private var modeAt = Date()
@@ -102,6 +127,7 @@ final class NotchDrips {
         smoothed = 0
         reach = 0
         shine = 0
+        swell = 0
         startedAt = Date()
         modeAt = Date()
         lastFrame = Date()
@@ -158,6 +184,19 @@ final class NotchDrips {
         reach += (out - reach) * (1 - exp(-dt * 8))
         flow += dt * (mode == .live ? 0.6 + 1.2 * smoothed : 0.4)
 
+        // the waves round the notch's edge: they rise with the voice, calm down while the text finishes, settle
+        var high: CGFloat
+        switch mode {
+        case .off: high = 0
+        case .live: high = 0.3 + 0.7 * smoothed
+        case .processing: high = 0.25
+        case .typed, .copied, .empty: high = 0.15
+        }
+        if !look.waves { high = 0 }
+        high *= 1 - leaving
+        swell += (high - swell) * (1 - exp(-dt * (high > swell ? 10 : 4)))
+        tide += dt * look.waveSpeed * (mode == .live ? 1.2 + 3 * smoothed : 0.8)
+
         // the glow: the badge's color. As the key goes down it flares up at once and settles, as Siri does, to a
         // faint glow that waits for the voice and brightens with it (the mic's first moments of noise hide under the
         // flare). At the end it swells into green when the text is typed, coral red when nothing came, and breathes
@@ -189,7 +228,7 @@ final class NotchDrips {
         glow *= (1 - leaving) * (min(look.glow * 1.4, 1) + 0.6 * max(look.glow - 1, 0))  // past 1 brighter still
         let rgb = color.usingColorSpace(.sRGB) ?? color
 
-        var u = [Float](repeating: 0, count: 15 + 5 * Self.maxDrips)
+        var u = [Float](repeating: 0, count: 18 + 5 * Self.maxDrips)
         u[2] = Float(scale)
         (u[3], u[4], u[5], u[6]) = (Float(notch.minX), Float(notch.minY), Float(notch.maxX), Float(notch.maxY))
         (u[7], u[8], u[9]) = (Float(rgb.redComponent), Float(rgb.greenComponent), Float(rgb.blueComponent))
@@ -217,6 +256,9 @@ final class NotchDrips {
             u[j + 3] = Float(bulb * 0.55)
             u[j + 4] = Float(bulb)
         }
+        u[15 + 5 * Self.maxDrips] = Float(5 * look.waveHeight * swell)  // the waves' height in points
+        u[16 + 5 * Self.maxDrips] = Float(tide)
+        u[17 + 5 * Self.maxDrips] = look.waveStyle == .venom ? 1 : 0
         return u
     }
 }
@@ -244,8 +286,9 @@ final class NotchShader {
 
     // Distances in points, top-left origin. u: [2] scale, [3...6] notch minX minY maxX maxY, [7...9] glow color,
     // [10] glow strength, [11] glow reach, [12] notch fillet, [13] drip fillet, [14] drip count, [15...] per drip:
-    // x, neck y, bulb y, neck radius, bulb radius.
+    // x, neck y, bulb y, neck radius, bulb radius; after them the waves' height, clock and style (1 Venom).
     static let source = """
+    #define WAVES \(15 + 5 * NotchDrips.maxDrips)
     #include <metal_stdlib>
     using namespace metal;
 
@@ -288,6 +331,40 @@ final class NotchShader {
         // the notch, a little inside the real one so the black never shows past it; its top runs off the view
         float2 lo = float2(notch.x + 3.0, -40.0), hi = float2(notch.z - 3.0, notch.w - 0.5);
         float d = roundedBox(p, (lo + hi) * 0.5, (hi - lo) * 0.5, min(9.0, (hi.x - lo.x) * 0.25));
+
+        // the waves: the edge swells outward in two trains running round it, measured along the contour (up the
+        // left side, along the bottom, up the right side), so they flow round the corners
+        float height = u[WAVES];
+        if (height > 0.0) {
+            float2 c = clamp(p, lo, hi);
+            float side = p.x < lo.x ? -1.0 : (p.x > hi.x ? 1.0 : 0.0);
+            float s = (c.x - lo.x) + side * (hi.y - c.y);
+            float t = u[WAVES + 1];
+            if (u[WAVES + 2] > 0.5) {
+                // Venom: the edge swells like goo, and a tendril every few points shoots out along the edge's normal
+                // and draws back at its own pace, wide at the base, pointed at the tip, melted into the notch
+                d -= height * (0.25 + 0.2 * sin(s * 0.09 + t * 0.7));
+                float cell = 11.0, w = hi.x - lo.x;
+                float tendrils = 1e5;
+                for (float k = floor(-hi.y / cell); k * cell < w + hi.y; k += 1.0) {
+                    float hash = fract(sin(k * 12.9898) * 43758.5453), hash2 = fract(sin(k * 78.233) * 43758.5453);
+                    float len = height * 3.2 * pow(max(sin(t * (0.6 + 0.8 * hash) + hash2 * 6.28), 0.0), 2.0) * (0.6 + 0.4 * hash);
+                    if (len < 0.3) continue;
+                    float at = (k + 0.5 + (hash2 - 0.5) * 0.5) * cell;
+                    float2 base, normal;
+                    if (at < 0.0) { base = float2(lo.x, hi.y + at); normal = float2(-1.0, 0.0); }
+                    else if (at > w) { base = float2(hi.x, hi.y - (at - w)); normal = float2(1.0, 0.0); }
+                    else { base = float2(lo.x + at, hi.y); normal = float2(0.0, 1.0); }
+                    float2 q = p - (base - normal * 2.0);
+                    float2 local = float2(dot(q, float2(normal.y, -normal.x)), dot(q, normal));
+                    tendrils = min(tendrils, unevenCapsule(local, (2.6 + 0.8 * hash) * min(len / 3.0, 1.0), 0.35, len + 2.0));
+                }
+                d = smin(d, tendrils, 3.0);
+            } else {
+                float wave = 0.55 * sin(s * 0.30 - t * 2.0) + 0.45 * sin(s * 0.19 + t * 1.3 + 1.7);
+                d -= height * (0.5 + 0.5 * wave);
+            }
+        }
 
         int count = int(u[14]);
         float drips = 1e5;
