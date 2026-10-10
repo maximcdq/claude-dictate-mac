@@ -1,4 +1,5 @@
 import AudioToolbox
+import CoreAudio
 import DictateAnimations
 import DictateCore
 import Foundation
@@ -14,15 +15,22 @@ final class LevelMeter: LevelSource {
     private var recorder: AudioQueueRef?
     private var attempt = 0  // a recorder that opens after a newer attempt (or a stop) is closed at once
     private var restarts = 0
+    private var device: AudioDeviceID?
+    private let input: () -> AudioDeviceID?  // the device to record from, asked at each start; nil is the default input
     private var lastBufferAt = Date()
     private var restartedAt = Date()
     private(set) var level: CGFloat = 0
     private(set) var heardAt: Date?  // the first audio since start
 
+    init(input: @escaping () -> AudioDeviceID?) {
+        self.input = input
+    }
+
     func start() {
         level = 0
         heardAt = nil
         restarts = 0
+        device = input()
         open()
     }
 
@@ -49,9 +57,9 @@ final class LevelMeter: LevelSource {
         restartedAt = Date()
         lastBufferAt = Date()
         attempt += 1
-        let attempt = attempt
+        let attempt = attempt, device = self.device
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let recorder = Self.openRecorder { v in
+            let recorder = Self.openRecorder(device: device) { v in
                 DispatchQueue.main.async {
                     guard let self else { return }
                     self.level = v
@@ -75,7 +83,7 @@ final class LevelMeter: LevelSource {
     }
 
     // off the main thread: may block while Core Audio is busy
-    private static func openRecorder(onLevel: @escaping (CGFloat) -> Void) -> AudioQueueRef? {
+    private static func openRecorder(device: AudioDeviceID?, onLevel: @escaping (CGFloat) -> Void) -> AudioQueueRef? {
         var format = AudioStreamBasicDescription(
             mSampleRate: 16000, mFormatID: kAudioFormatLinearPCM,
             mFormatFlags: kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked,
@@ -91,6 +99,15 @@ final class LevelMeter: LevelSource {
             onLevel(CGFloat(sqrt(min(rms16 / 2000, 1))))
         }
         guard status == noErr, let queue else { log("mic: AudioQueueNewInput failed (\(status))"); return nil }
+        // bound to the device itself: a recorder on the default input goes silent when the default moves to the
+        // built-in mic right under it
+        if let device, let uid = Mic.uid(device) {
+            var cfUID = uid as CFString
+            let set = withUnsafeMutablePointer(to: &cfUID) {
+                AudioQueueSetProperty(queue, kAudioQueueProperty_CurrentDevice, $0, UInt32(MemoryLayout<CFString>.size))
+            }
+            if set != noErr { log("mic: binding the recorder to \(uid) failed (\(set))") }
+        }
         for _ in 0..<3 {
             var buffer: AudioQueueBufferRef?
             AudioQueueAllocateBuffer(queue, 1600, &buffer)  // 50 ms
