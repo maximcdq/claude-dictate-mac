@@ -18,13 +18,6 @@ struct DictationPane: View {
                     .foregroundStyle(.secondary)
             }
             Section {
-                Toggle("Record with the built-in microphone", isOn: settings.binding(.builtInMic))
-            } footer: {
-                Text("While dictating, the Mac's own mic becomes the input, so AirPods keep their high-quality audio; the previous input comes back afterwards. Off: the system's default input is used.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            Section {
                 Toggle("Pause music and videos while dictating", isOn: settings.binding(.pauseMedia))
             } footer: {
                 Text("Whatever is playing (Music, Spotify, a video in the browser) pauses when the dictation begins and plays on when it ends. Nothing starts that wasn't playing.")
