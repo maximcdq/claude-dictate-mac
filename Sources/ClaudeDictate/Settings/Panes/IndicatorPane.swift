@@ -53,8 +53,11 @@ struct IndicatorPane: View {
                         Picker("Style", selection: settings.binding(.waveStyle)) {
                             ForEach(NotchWaveStyle.allCases) { Text($0.title).tag($0) }
                         }
-                        Slider(value: settings.binding(.waveHeight), in: 0.5...2) { Text("Height") }
-                        Slider(value: settings.binding(.waveSpeed), in: 0.5...2) { Text("Speed") }
+                        Group {
+                            Slider(value: settings.binding(.waveHeight), in: 0.5...2) { Text("Height") }
+                            Slider(value: settings.binding(.waveSpeed), in: 0.5...2) { Text("Speed") }
+                        }
+                        .disabled(settings[.waveStyle] == .off)
                     }
                 }
             }

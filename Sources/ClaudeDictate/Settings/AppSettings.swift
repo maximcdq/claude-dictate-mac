@@ -21,7 +21,7 @@ extension Setting {
     static var notchWaves: Setting<Bool> { .init("notchWaves", default: false) }
     static var waveHeight: Setting<Double> { .init("waveHeight", default: 1) }
     static var waveSpeed: Setting<Double> { .init("waveSpeed", default: 1) }
-    static var waveStyle: Setting<NotchWaveStyle> { .init("waveStyle", default: .calm) }
+    static var waveStyle: Setting<NotchWaveStyle> { .init("waveStyle", default: .off) }
     // the result icon by the notch: on Liquid Glass or bare (white, black or like the menu bar), on the notch's
     // right or left or below it
     static var resultGlass: Setting<Bool> { .init("resultGlass", default: true) }

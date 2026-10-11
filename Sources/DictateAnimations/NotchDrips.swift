@@ -19,12 +19,13 @@ import SwiftUI
 // (`result`). `waves` (in development) ripples the notch's whole edge with the voice: `waveHeight` and `waveSpeed`
 // 0.5...2, smooth, Venom-like tendrils or iTerm's green progress bar running round the edge (`waveStyle`).
 public enum NotchWaveStyle: String, CaseIterable, Identifiable {
-    case calm, venom, progress
+    case off, calm, venom, progress
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
+        case .off: "Off"
         case .calm: "Waves"
         case .venom: "Venom"
         case .progress: "Progress bar"
@@ -193,7 +194,7 @@ final class NotchDrips {
         case .processing: high = 0.25
         case .typed, .copied, .empty: high = 0.15
         }
-        if !look.waves { high = 0 }
+        if !look.waves || look.waveStyle == .off { high = 0 }
         high *= 1 - leaving
         swell += (high - swell) * (1 - exp(-dt * (high > swell ? 10 : 4)))
         tide += dt * look.waveSpeed * (mode == .live ? 1.2 + 3 * smoothed : 0.8)
@@ -227,8 +228,6 @@ final class NotchDrips {
         }
         var glow = max(flare, shine)
         glow *= (1 - leaving) * (min(look.glow * 1.4, 1) + 0.6 * max(look.glow - 1, 0))  // past 1 brighter still
-        // iTerm's progress bar is green, and so is its glow
-        if look.waves, look.waveStyle == .progress, mode == .live || mode == .processing { color = Palette.typed }
         let rgb = color.usingColorSpace(.sRGB) ?? color
 
         var u = [Float](repeating: 0, count: 19 + 5 * Self.maxDrips)
@@ -262,7 +261,7 @@ final class NotchDrips {
         u[15 + 5 * Self.maxDrips] = Float(5 * look.waveHeight * swell)  // the waves' height in points
         u[16 + 5 * Self.maxDrips] = Float(tide)
         u[17 + 5 * Self.maxDrips] = switch look.waveStyle {
-        case .calm: 0
+        case .off, .calm: 0
         case .venom: 1
         case .progress: 2
         }
@@ -396,12 +395,15 @@ final class NotchShader {
             float2 c = clamp(p, lo, hi);
             float side = p.x < lo.x ? -1.0 : (p.x > hi.x ? 1.0 : 0.0);
             float s = (c.x - lo.x) + side * (hi.y - c.y);
-            float width = 1.0 + 0.3 * height;
-            float bar = clamp(0.5 - (abs(d - width * 0.5) - width * 0.5) * scale, 0.0, 1.0) * u[WAVES + 3];
+            float width = 2.0 + 0.3 * height;
+            // round the real notch's outline: the shape drawn above sits inside it, where the hardware hides it
+            float2 lo2 = float2(notch.x, -40.0), hi2 = notch.zw;
+            float edge = roundedBox(p, (lo2 + hi2) * 0.5, (hi2 - lo2) * 0.5, min(11.0, (hi2.x - lo2.x) * 0.25));
+            float bar = clamp(0.5 - (abs(edge - width * 0.5) - width * 0.5) * scale, 0.0, 1.0) * u[WAVES + 3];
             float around = (hi.x - lo.x) + 2.0 * hi.y;
             float sweep = fract(u[WAVES + 1] * 0.15) * (around + 80.0) - 40.0 - hi.y;
             float shine = exp(-pow((s - sweep) / 22.0, 2.0));
-            float3 green = float3(0.30, 0.85, 0.45) * (0.6 + 0.4 * shine) + float3(0.5) * shine * 0.5;
+            float3 green = float3(0.30, 0.85, 0.45) * (0.85 + 0.15 * shine) + float3(0.4) * shine;
             rgb = green * bar + rgb * (1.0 - bar);
             alpha = bar + alpha * (1.0 - bar);
         }
