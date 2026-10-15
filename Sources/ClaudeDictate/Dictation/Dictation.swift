@@ -106,9 +106,13 @@ final class Dictation {
         if settings[.builtInMic] { Mic.useBuiltIn() }
         if settings[.pauseMedia] { NowPlaying.pauseIfPlaying() }
         style = settings[.indicator]
-        if style == .notch, !notch.show() {
-            style = .badge
-            log("notch indicator unavailable (no notch on the pointer's screen, or no Metal): the badge instead")
+        if style == .notch {
+            if notch.show() {
+                log("notch indicator shown: \(NotchIndicator.diagnosis())")
+            } else {
+                style = .badge
+                log("notch indicator unavailable, the badge instead: \(NotchIndicator.diagnosis())")
+            }
         }
         switch style {
         case .badge:
