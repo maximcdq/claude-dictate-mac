@@ -486,6 +486,15 @@ public final class NotchIndicator {
         return notched.first { $0.frame.contains(m) } ?? (anywhere ? notched.first : nil)
     }
 
+    // what `show` decides by, for the log: the shader, the pointer and each screen with its notch
+    public static func diagnosis() -> String {
+        let screens = NSScreen.screens.map {
+            "\($0.localizedName) \(NSStringFromRect($0.frame)) top inset \($0.safeAreaInsets.top) notch \($0.auxiliaryTopLeftArea != nil)"
+        }
+        return "shader \(NotchShader.shared.pipeline != nil ? "ready" : "not ready"), pointer \(NSStringFromPoint(NSEvent.mouseLocation)), "
+            + "screens: \(screens.joined(separator: "; "))"
+    }
+
     // false when there's no notch to hang from, or the shader isn't ready
     @discardableResult
     public func show(anywhere: Bool = false) -> Bool {
