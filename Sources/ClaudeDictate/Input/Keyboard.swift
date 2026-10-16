@@ -19,8 +19,14 @@ enum Keyboard {
     }
 
     static func type(_ s: String) {
-        let units = Array(s.utf16)
-        stride(from: 0, to: units.count, by: 16).forEach { post(0, text: Array(units[$0..<min($0 + 16, units.count)])) }
+        // chunks of up to 16 UTF-16 units that end on a character boundary: a split emoji or composed letter comes out as garbage
+        var chunk: [UniChar] = []
+        for character in s {
+            let units = Array(String(character).utf16)
+            if !chunk.isEmpty, chunk.count + units.count > 16 { post(0, text: chunk); chunk = [] }
+            chunk += units
+        }
+        if !chunk.isEmpty { post(0, text: chunk) }
     }
 
     static func backspace(_ n: Int) { (0..<n).forEach { _ in post(51) } }  // kVK_Delete
