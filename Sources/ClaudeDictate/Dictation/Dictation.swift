@@ -15,6 +15,7 @@ final class Dictation {
     var held = false  // the hotkey is down
     var beganAt = Date()
     var restartPending = false  // the hidden session restarts for new settings once this dictation is over
+    var downWhileFinishing = false  // the hotkey went down while the previous dictation was finishing: start once it's over
     var phase = Phase.idle
     var isActive: Bool { phase == .holding || phase == .finishing }
     var blocksKeys: Bool { isActive && !cancelled }  // a cancelled dictation types nothing more: keys go through
@@ -74,7 +75,11 @@ final class Dictation {
         if phase == .holding { cancelPending(); return }
         if phase == .arming { return }
         guard pty.isReady else { log("hotkey ignored: claude is still starting"); return }
-        guard phase == .idle else { log("hotkey ignored: the previous dictation is still finishing"); return }
+        guard phase == .idle else {
+            downWhileFinishing = true
+            log("hotkey down while the previous dictation is finishing: it starts once that one is done")
+            return
+        }
         phase = .arming
         schedule(after: holdToStart) { [weak self] in self?.begin() }
     }
@@ -271,6 +276,9 @@ final class Dictation {
             sync(t)
             guard finalIn(since: releasedAt) else { return }
             finish(text: t)
+            // still held since it went down mid-finish: the next dictation begins now instead of the press being lost
+            if downWhileFinishing, held { hotkeyDown() }
+            downWhileFinishing = false
         }
     }
 
