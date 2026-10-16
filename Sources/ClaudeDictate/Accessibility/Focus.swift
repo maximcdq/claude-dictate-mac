@@ -168,6 +168,8 @@ func focusState(_ element: AXUIElement?) -> Focus {
 
 func focusedTakesText(_ element: AXUIElement?) -> Bool {
     guard let element, onScreen(element) else { return false }
+    // a password field (role AXTextField, subrole AXSecureTextField): never type into it, the text goes to the clipboard
+    if role(of: element).contains("AXSecureTextField") { return false }
     if ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"].contains(where: { role(of: element).hasPrefix($0) }) {
         return true
     }
