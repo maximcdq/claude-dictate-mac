@@ -247,7 +247,8 @@ final class Dictation {
                     log("no text field in focus (\(role(of: field)) in \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?")): the text goes to the clipboard")
                 }
             }
-            sync(live())
+            let text = live()
+            sync(text)
             if continuing {
                 guard finalIn(since: pausedAt) else { return }
                 continuing = false
@@ -255,7 +256,9 @@ final class Dictation {
                 log("recording continued")
                 return
             }
-            let stoppedByClaude = pty.lastProcessingAt > recordingStart || pty.lastNoSpeechAt > recordingStart
+            // the prompt with the transcript is on Claude's screen too: a dictated "processing" there is not /voice stopping
+            let echoed = text.localizedCaseInsensitiveContains("processing")
+            let stoppedByClaude = (!echoed && pty.lastProcessingAt > recordingStart) || pty.lastNoSpeechAt > recordingStart
             guard stoppedByClaude || Date().timeIntervalSince(recordingStart) > Self.maxRecording else { return }
             log(stoppedByClaude ? "claude ended the recording (2 min or 15 s of silence)" : "2 min reached")
             if held, pending == nil {
