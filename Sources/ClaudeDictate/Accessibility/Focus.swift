@@ -69,10 +69,15 @@ func caretRect() -> CGRect? {
     return result
 }
 
+// An app that hangs must not block us for the default AX timeout (6 s): the hotkey event tap is disabled when its
+// callback is slow.
+private let axTimeout: Float = 0.5
+
 // Chrome and Electron build their accessibility tree (and so report the focused field) only when asked.
 func enableAppAccessibility() {
     guard let app = NSWorkspace.shared.frontmostApplication else { return }
     let element = AXUIElementCreateApplication(app.processIdentifier)
+    AXUIElementSetMessagingTimeout(element, axTimeout)
     AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
     // Chromium 15x ignores that one and switches its web content off again when unused; the flag VoiceOver sets turns
     // it on. Only for Chromium: to any other app it says a screen reader is running, and some change their behavior
@@ -102,12 +107,15 @@ func isChromium(_ app: NSRunningApplication) -> Bool {
 // The field that has keyboard focus, to notice the user clicking elsewhere mid-dictation.
 func focusedElement() -> AXUIElement? {
     var focused: CFTypeRef?
-    if AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+    let systemWide = AXUIElementCreateSystemWide()
+    AXUIElementSetMessagingTimeout(systemWide, axTimeout)
+    if AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
        let el = focused { return (el as! AXUIElement) }
     // Chrome at times answers only through its own app element
-    guard let app = NSWorkspace.shared.frontmostApplication,
-          AXUIElementCopyAttributeValue(AXUIElementCreateApplication(app.processIdentifier),
-                                        kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+    guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+    let appElement = AXUIElementCreateApplication(app.processIdentifier)
+    AXUIElementSetMessagingTimeout(appElement, axTimeout)
+    guard AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
           let el = focused else { return nil }
     return (el as! AXUIElement)
 }
