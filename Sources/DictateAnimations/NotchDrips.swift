@@ -483,7 +483,11 @@ public final class NotchIndicator {
     public static func screen(anywhere: Bool = false) -> NSScreen? {
         let notched = NSScreen.screens.filter { $0.safeAreaInsets.top > 0 && $0.auxiliaryTopLeftArea != nil }
         let m = NSEvent.mouseLocation
-        return notched.first { $0.frame.contains(m) } ?? (anywhere ? notched.first : nil)
+        // on the top or right edge the pointer reports the screen's maxY/maxX, which `NSRect.contains` leaves out
+        return notched.first { s in
+            let f = s.frame
+            return (f.minX...f.maxX).contains(m.x) && (f.minY...f.maxY).contains(m.y)
+        } ?? (anywhere ? notched.first : nil)
     }
 
     // what `show` decides by, for the log: the shader, the pointer and each screen with its notch
