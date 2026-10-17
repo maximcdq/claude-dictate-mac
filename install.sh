@@ -38,7 +38,7 @@ pkill -x ClaudeDictate 2>/dev/null || true
 
 rm -rf "$APP"
 mkdir -p "$(dirname "$APP")"
-ditto build/ClaudeDictate.app "$APP"
+ditto build.noindex/ClaudeDictate.app "$APP"
 codesign --force --sign "$IDENTITY" --identifier "$LABEL" "$APP"
 
 mkdir -p "$HOME/Library/LaunchAgents"

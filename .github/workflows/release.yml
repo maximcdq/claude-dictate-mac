@@ -19,8 +19,8 @@ jobs:
         run: scripts/bundle.sh --universal
       - name: Sign and zip
         run: |
-          codesign --force --sign - --identifier local.claude-dictate build/ClaudeDictate.app
-          ditto -c -k --keepParent build/ClaudeDictate.app ClaudeDictate.zip
+          codesign --force --sign - --identifier local.claude-dictate build.noindex/ClaudeDictate.app
+          ditto -c -k --keepParent build.noindex/ClaudeDictate.app ClaudeDictate.zip
       - name: Upload
         env:
           GH_TOKEN: ${{ github.token }}

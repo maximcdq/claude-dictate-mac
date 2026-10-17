@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds ClaudeDictate.app into build/: the binary, Info.plist (version from VERSION), the icon and the helper mod.
+# Builds ClaudeDictate.app into build.noindex/ (the suffix keeps Spotlight from listing a second copy): the binary, Info.plist (version from VERSION), the icon and the helper mod.
 # The bundle is left unsigned; install.sh signs it with the local identity, the release workflow ad hoc.
 #   scripts/bundle.sh             this Mac's architecture
 #   scripts/bundle.sh --universal arm64 + x86_64 (releases)
@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION="$(tr -d '[:space:]' < VERSION)"
-APP="build/ClaudeDictate.app"
+APP="build.noindex/ClaudeDictate.app"
 
 ARGS=(-c release)
 [[ "${1:-}" == "--universal" ]] && ARGS+=(--arch arm64 --arch x86_64)
