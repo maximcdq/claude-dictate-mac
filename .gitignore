@@ -1,4 +1,4 @@
-build/
+build.noindex/
 .build/
 .swiftpm/
 build.log
