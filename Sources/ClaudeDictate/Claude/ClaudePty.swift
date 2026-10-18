@@ -69,7 +69,8 @@ final class ClaudePty {
         env["PATH"] = "\(Paths.home)/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         let envp = env.map { strdup("\($0.key)=\($0.value)") } + [nil]
         let bin = claudeBinary()
-        let args: [String] = [bin, "--plugin-dir", Paths.mod, "--settings", sessionSettings()]
+        // --strict-mcp-config: this session never runs a tool, so the user's MCP servers would only start and sit in memory
+        let args: [String] = [bin, "--plugin-dir", Paths.mod, "--settings", sessionSettings(), "--strict-mcp-config"]
         let argv = args.map { strdup($0) } + [nil]
         defer { (envp + argv).forEach { free($0) } }
 
