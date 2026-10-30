@@ -25,6 +25,8 @@ final class Dictation {
     var spaceTimer: Timer?
     var pollTimer: Timer?
     var typed: [Character] = []  // what this dictation has put in the field so far
+    // a space before the text when the caret sits right after a word (the previous dictation's, say)
+    var lead = "" { didSet { if !lead.isEmpty { log("a space first: the caret is right after a word") } } }
     var target: AXUIElement?
 
     // the hotkey only counts when held: a tap, or the key with another (Fn+F5, ⌘C), passes through untouched
@@ -102,6 +104,7 @@ final class Dictation {
         continuing = false
         typed = []
         target = focus == .field ? field : nil
+        lead = target.map { needsSpaceBefore($0) ? " " : "" } ?? ""
         beganAt = Date()
         if settings[.builtInMic] { Mic.useBuiltIn() }
         if settings[.pauseMedia] { NowPlaying.pauseIfPlaying() }
@@ -211,7 +214,7 @@ final class Dictation {
             log("focus moved: typing stopped")
             return
         }
-        let goal = Array(text)
+        let goal = text.isEmpty ? [] : Array(lead + text)
         var common = 0
         while common < typed.count, common < goal.count, typed[common] == goal[common] { common += 1 }
         guard common < typed.count || common < goal.count else { return }
@@ -240,6 +243,7 @@ final class Dictation {
                 if focusedTakesText(field) {
                     self.searchUntil = nil
                     target = field
+                    lead = field.map { needsSpaceBefore($0) ? " " : "" } ?? ""
                     detached = false
                     log("typing into \(role(of: field)) in \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?")")
                 } else if Date() > searchUntil {
