@@ -30,6 +30,7 @@ final class ClaudePty {
     private var tail = ""
     private(set) var lastProcessingAt = Date.distantPast
     private(set) var lastNoSpeechAt = Date.distantPast
+    private(set) var lastVoiceAt = Date.distantPast  // /voice took the held Space as hold-to-talk
     var isReady: Bool { Date().timeIntervalSince(startedAt) > 8 }
     var language: () -> String = { "" }  // the dictation language; empty follows the user's Claude Code settings
 
@@ -124,6 +125,7 @@ final class ClaudePty {
         tail = String((tail + text).suffix(3000))
         if text.contains("processing") { lastProcessingAt = Date() }
         if text.contains("No speech detected") { lastNoSpeechAt = Date() }
+        if text.contains("keep holding") || text.contains("listening") { lastVoiceAt = Date() }
         // first run in agentDir (an empty folder of ours): the trust prompt defaults to "No, exit"; pick "Yes"
         if !trustAnswered,
            tail.replacingOccurrences(of: "(\u{1b}\\[[0-9;?<>=]*[A-Za-z~]|\\s)+", with: " ", options: .regularExpression)
@@ -141,10 +143,10 @@ final class ClaudePty {
     }
 
     // a fresh session with the current settings: the exit watch starts it again; not ready until it has
-    func restart() {
+    func restart(because reason: String = "new settings") {
         guard pid > 0 else { return start() }
         startedAt = Date()
-        log("restarting claude for new settings")
+        log("restarting claude: \(reason)")
         kill(-pid, SIGKILL)
     }
 
