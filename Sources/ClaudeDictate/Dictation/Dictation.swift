@@ -24,6 +24,8 @@ final class Dictation {
     var releasedAt = Date()
     var spaceTimer: Timer?
     var pollTimer: Timer?
+    var loginTimer: Timer?
+    var loginStamp: Date?
     var typed: [Character] = []  // what this dictation has put in the field so far
     var target: AXUIElement?
 
@@ -36,6 +38,7 @@ final class Dictation {
     // While the hotkey is still held that is only a pause: once that recording's final text is in, the next one starts and
     // appends to the same prompt, so a dictation runs as long as the hotkey is held.
     static let maxRecording: TimeInterval = 125  // in case Claude's own stop goes unnoticed
+    static let voiceAnswers: TimeInterval = 1  // a held Space gets "keep holding" within 0.05 s (measured on 2.1.316)
     var recordingStart = Date()
     var continuing = false  // between Claude's stop and the next recording
     var pausedAt = Date()
@@ -57,6 +60,15 @@ final class Dictation {
         installMod()
         pty.start()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in self?.tick() }
+        loginStamp = claudeLoginStamp()
+        loginTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.checkLogin() }
+    }
+
+    private func checkLogin() {
+        guard let now = claudeLoginStamp(), now != loginStamp else { return }
+        loginStamp = now
+        log("claude login changed")
+        restartClaude()
     }
 
     var isIdle: Bool { phase == .idle }
@@ -281,6 +293,11 @@ final class Dictation {
         NowPlaying.resume()
         if restartPending { restartClaude() }
         log("done: \(text.count) chars\(cancelled ? ", cancelled" : "")\(detached ? (target == nil ? ", to the clipboard" : ", focus moved, to the clipboard") : "")")
+        // The Space was held and /voice never answered (it does within a fraction of a second): this session has lost
+        // voice, as a session without a login has, and no later dictation would work. A new session has it back.
+        if text.isEmpty, !cancelled, pty.lastVoiceAt < beganAt, releasedAt.timeIntervalSince(beganAt) > Self.voiceAnswers {
+            pty.restart(because: "voice never answered the held Space")
+        }
         // the clipboard only when the text did not land in a field: typed text leaves it alone
         if !cancelled, !text.isEmpty, detached {
             let pb = NSPasteboard.general
