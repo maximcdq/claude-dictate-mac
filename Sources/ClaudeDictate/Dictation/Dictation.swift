@@ -283,7 +283,7 @@ final class Dictation {
         if restartPending { restartClaude() }
         log("done: \(text.count) chars\(cancelled ? ", cancelled" : "")\(detached ? (target == nil ? ", to the clipboard" : ", focus moved, to the clipboard") : "")")
         // The Space was held and /voice never answered (it does within a fraction of a second): this session has lost
-        // voice, as one started before a /login does, and no later dictation would work. A new session has it back.
+        // voice, as a session without a login has, and no later dictation would work. A new session has it back.
         if text.isEmpty, !cancelled, pty.lastVoiceAt < beganAt, releasedAt.timeIntervalSince(beganAt) > Self.voiceAnswers {
             pty.restart(because: "voice never answered the held Space")
         }
