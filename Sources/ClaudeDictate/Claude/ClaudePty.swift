@@ -1,5 +1,18 @@
 import AppKit
 import DictateCore
+import Security
+
+// When Claude Code's login last changed: the date on its Keychain item, read without touching the token. A running
+// session does not pick up a new /login by itself.
+func claudeLoginStamp() -> Date? {
+    let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                kSecAttrService as String: "Claude Code-credentials",
+                                kSecMatchLimit as String: kSecMatchLimitOne,
+                                kSecReturnAttributes as String: true]
+    var item: CFTypeRef?
+    guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess else { return nil }
+    return (item as? [String: Any])?[kSecAttrModificationDate as String] as? Date
+}
 
 // the newest real binary of the native install: ~/.local/bin/claude is a wrapper script that puts claude in a pty
 // of its own, which would leave it orphaned (and out of our process group) when the app quits; other installs
@@ -143,7 +156,7 @@ final class ClaudePty {
     }
 
     // a fresh session with the current settings: the exit watch starts it again; not ready until it has
-    func restart(because reason: String = "new settings") {
+    func restart(because reason: String = "new settings or login") {
         guard pid > 0 else { return start() }
         startedAt = Date()
         log("restarting claude: \(reason)")

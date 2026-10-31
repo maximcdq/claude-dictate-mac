@@ -24,6 +24,8 @@ final class Dictation {
     var releasedAt = Date()
     var spaceTimer: Timer?
     var pollTimer: Timer?
+    var loginTimer: Timer?
+    var loginStamp: Date?
     var typed: [Character] = []  // what this dictation has put in the field so far
     var target: AXUIElement?
 
@@ -58,6 +60,15 @@ final class Dictation {
         installMod()
         pty.start()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in self?.tick() }
+        loginStamp = claudeLoginStamp()
+        loginTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.checkLogin() }
+    }
+
+    private func checkLogin() {
+        guard let now = claudeLoginStamp(), now != loginStamp else { return }
+        loginStamp = now
+        log("claude login changed")
+        restartClaude()
     }
 
     var isIdle: Bool { phase == .idle }
