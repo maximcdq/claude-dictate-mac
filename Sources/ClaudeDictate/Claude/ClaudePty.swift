@@ -16,11 +16,12 @@ func claudeLoginStamp() -> Date? {
 
 // the newest real binary of the native install: ~/.local/bin/claude is a wrapper script that puts claude in a pty
 // of its own, which would leave it orphaned (and out of our process group) when the app quits; other installs
-// (Homebrew, npm) are found on the usual paths
+// (Homebrew, npm) are found on the usual paths. A version Claude Code's auto-update is still writing is not executable yet.
 func claudeBinary() -> String {
     let dir = "\(Paths.home)/.local/share/claude/versions"
     let fm = FileManager.default
-    let newest = ((try? fm.contentsOfDirectory(atPath: dir)) ?? []).max { a, b in
+    let versions = ((try? fm.contentsOfDirectory(atPath: dir)) ?? []).filter { fm.isExecutableFile(atPath: "\(dir)/\($0)") }
+    let newest = versions.max { a, b in
         let da = (try? fm.attributesOfItem(atPath: "\(dir)/\(a)")[.modificationDate] as? Date) ?? .distantPast
         let db = (try? fm.attributesOfItem(atPath: "\(dir)/\(b)")[.modificationDate] as? Date) ?? .distantPast
         return da < db
@@ -38,6 +39,7 @@ final class ClaudePty {
     private var pid: pid_t = 0
     private var reader: DispatchSourceRead?
     private var exitWatch: DispatchSourceProcess?
+    private var retry: DispatchWorkItem?  // the next start after a failed one
     private var startedAt = Date()
     private var trustAnswered = false
     private var tail = ""
@@ -60,6 +62,8 @@ final class ClaudePty {
     }
 
     func start() {
+        retry?.cancel()
+        retry = nil
         killLeftover()
         var m: Int32 = 0, s: Int32 = 0
         var size = winsize(ws_row: 40, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0)
@@ -92,7 +96,17 @@ final class ClaudePty {
         let rc = posix_spawn(&pid, bin, &fa, &attr, argv, envp)
         posix_spawn_file_actions_destroy(&fa)
         posix_spawnattr_destroy(&attr)
-        guard rc == 0 else { log("spawn failed: \(rc)"); return }
+        // without a session no dictation works: try again (a restart() in the meantime starts at once instead)
+        guard rc == 0 else {
+            log("spawn failed: \(rc) (\(bin)), retrying in 5 s")
+            close(m)
+            master = -1
+            pid = 0
+            let work = DispatchWorkItem { [weak self] in self?.start() }
+            retry = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: work)
+            return
+        }
         startedAt = Date()
         trustAnswered = false
         try? "\(pid)".write(toFile: pidFile, atomically: true, encoding: .utf8)
