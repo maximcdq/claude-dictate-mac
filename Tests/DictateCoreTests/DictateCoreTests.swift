@@ -17,6 +17,22 @@ import Testing
     #expect(Hotkey.fn.isDown(.maskSecondaryFn))
 }
 
+@Test func claudeVersionSkipsUnfinishedAndFailed() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("dictate-versions-\(UUID())").path
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    for (i, name) in ["old", "previous", "newest", "writing"].enumerated() {
+        let path = "\(dir)/\(name)"
+        FileManager.default.createFile(atPath: path, contents: Data())
+        try FileManager.default.setAttributes([.posixPermissions: name == "writing" ? 0o644 : 0o755,
+                                               .modificationDate: Date(timeIntervalSince1970: Double(i) * 100)], ofItemAtPath: path)
+    }
+    #expect(claudeVersion(in: dir) == "\(dir)/newest")
+    #expect(claudeVersion(in: dir, avoiding: ["\(dir)/newest"]) == "\(dir)/previous")
+    #expect(claudeVersion(in: dir, avoiding: ["\(dir)/newest", "\(dir)/previous", "\(dir)/old"]) == "\(dir)/newest")
+    #expect(claudeVersion(in: "\(dir)/none") == nil)
+}
+
 private enum Style: String { case a, b }
 
 @Test func settingsStoreReadsDefaultsWritesAndNotifies() {
