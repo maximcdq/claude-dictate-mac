@@ -16,17 +16,10 @@ func claudeLoginStamp() -> Date? {
 
 // the newest real binary of the native install: ~/.local/bin/claude is a wrapper script that puts claude in a pty
 // of its own, which would leave it orphaned (and out of our process group) when the app quits; other installs
-// (Homebrew, npm) are found on the usual paths. A version Claude Code's auto-update is still writing is not executable yet.
-func claudeBinary() -> String {
-    let dir = "\(Paths.home)/.local/share/claude/versions"
+// (Homebrew, npm) are found on the usual paths
+func claudeBinary(avoiding failed: Set<String> = []) -> String {
+    if let version = claudeVersion(in: "\(Paths.home)/.local/share/claude/versions", avoiding: failed) { return version }
     let fm = FileManager.default
-    let versions = ((try? fm.contentsOfDirectory(atPath: dir)) ?? []).filter { fm.isExecutableFile(atPath: "\(dir)/\($0)") }
-    let newest = versions.max { a, b in
-        let da = (try? fm.attributesOfItem(atPath: "\(dir)/\(a)")[.modificationDate] as? Date) ?? .distantPast
-        let db = (try? fm.attributesOfItem(atPath: "\(dir)/\(b)")[.modificationDate] as? Date) ?? .distantPast
-        return da < db
-    }
-    if let newest { return "\(dir)/\(newest)" }
     let found = ["\(Paths.home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "\(Paths.home)/.npm-global/bin"]
         .map { "\($0)/claude" }.first { fm.isExecutableFile(atPath: $0) }
     return found.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } ?? "\(Paths.home)/.local/bin/claude"
@@ -39,7 +32,12 @@ final class ClaudePty {
     private var pid: pid_t = 0
     private var reader: DispatchSourceRead?
     private var exitWatch: DispatchSourceProcess?
-    private var retry: DispatchWorkItem?  // the next start after a failed one
+    private var retry: DispatchWorkItem?  // the next start, after a failed one or an exit
+    private var bin = ""  // the Claude Code this session runs
+    // versions that would not start or never gave voice: the next start takes the one before, so a broken Claude Code
+    // update leaves dictation on the previous version
+    private var failed: Set<String> = []
+    private var killing = false  // the coming exit is a restart of ours, not claude quitting
     private var startedAt = Date()
     private var trustAnswered = false
     private var tail = ""
@@ -67,7 +65,7 @@ final class ClaudePty {
         killLeftover()
         var m: Int32 = 0, s: Int32 = 0
         var size = winsize(ws_row: 40, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0)
-        guard openpty(&m, &s, nil, nil, &size) == 0 else { log("openpty failed"); return }
+        guard openpty(&m, &s, nil, nil, &size) == 0 else { log("openpty failed, retrying in 5 s"); return startAgain(after: 5) }
         let slavePath = String(cString: ptsname(m))
         close(s)
         master = m
@@ -85,8 +83,10 @@ final class ClaudePty {
         env["DICTATE_STATE_DIR"] = Paths.state
         env["TERM"] = "xterm-256color"
         env["PATH"] = "\(Paths.home)/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        // updates are left to the user's own sessions: this one gets killed on a restart, also in the middle of one
+        env["DISABLE_AUTOUPDATER"] = "1"
         let envp = env.map { strdup("\($0.key)=\($0.value)") } + [nil]
-        let bin = claudeBinary()
+        bin = claudeBinary(avoiding: failed)
         // --strict-mcp-config: this session never runs a tool, so the user's MCP servers would only start and sit in memory
         let args: [String] = [bin, "--plugin-dir", Paths.mod, "--settings", sessionSettings(), "--strict-mcp-config"]
         let argv = args.map { strdup($0) } + [nil]
@@ -96,21 +96,19 @@ final class ClaudePty {
         let rc = posix_spawn(&pid, bin, &fa, &attr, argv, envp)
         posix_spawn_file_actions_destroy(&fa)
         posix_spawnattr_destroy(&attr)
-        // without a session no dictation works: try again (a restart() in the meantime starts at once instead)
+        // without a session no dictation works: try again, with the version before this one
         guard rc == 0 else {
             log("spawn failed: \(rc) (\(bin)), retrying in 5 s")
+            failed.insert(bin)
             close(m)
             master = -1
             pid = 0
-            let work = DispatchWorkItem { [weak self] in self?.start() }
-            retry = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: work)
-            return
+            return startAgain(after: 5)
         }
         startedAt = Date()
         trustAnswered = false
         try? "\(pid)".write(toFile: pidFile, atomically: true, encoding: .utf8)
-        log("claude started, pid \(pid)")
+        log("claude started, pid \(pid): \(bin)")
 
         let r = DispatchSource.makeReadSource(fileDescriptor: m, queue: .main)
         r.setEventHandler { [weak self] in self?.drain() }
@@ -124,14 +122,25 @@ final class ClaudePty {
             waitpid(self.pid, &status, 0)
             let plain = self.tail.replacingOccurrences(of: "\u{1b}\\[[0-9;?<>=]*[A-Za-z~]", with: " ", options: .regularExpression)
             log("claude exited (\(status)), restarting; last output: \(plain.suffix(800))")
+            // quit on its own before it was ready: this version does not run here
+            if !self.killing, !self.isReady { self.failed.insert(self.bin) }
+            self.killing = false
             self.reader?.cancel()
             self.exitWatch?.cancel()
             close(self.master)
             self.master = -1
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.start() }
+            self.pid = 0
+            self.startAgain(after: 2)
         }
         w.resume()
         exitWatch = w
+    }
+
+    // a restart() in the meantime starts at once instead
+    private func startAgain(after delay: TimeInterval) {
+        let work = DispatchWorkItem { [weak self] in self?.start() }
+        retry = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     // voice is off in the user's settings (Space types spaces in their sessions); this session turns it on
@@ -169,13 +178,19 @@ final class ClaudePty {
         if pid > 0 { kill(-pid, SIGKILL) }  // claude ignores SIGTERM; this session holds nothing worth saving
     }
 
-    // a fresh session with the current settings: the exit watch starts it again; not ready until it has
-    func restart(because reason: String = "new settings or login") {
+    // a fresh session with the current settings: the exit watch starts it again; not ready until it has.
+    // `versionFailed`: this version did not work, the new session runs the one before it.
+    func restart(because reason: String = "new settings or login", versionFailed: Bool = false) {
+        if versionFailed { failed.insert(bin) }
         guard pid > 0 else { return start() }
         startedAt = Date()
+        killing = true
         log("restarting claude: \(reason)")
         kill(-pid, SIGKILL)
     }
+
+    // with a new login the versions that failed may work again
+    func loginChanged() { failed = [] }
 
     func write(_ s: String) {
         guard master >= 0 else { return }
