@@ -243,6 +243,7 @@ final class Dictation {
     }
 
     private func tick() {
+        Pointer.hold(blocksKeys)
         if style == .caret, phase == .holding || phase == .finishing { caret.follow() }  // it moves as text is typed
         switch phase {
         case .idle, .arming: return
