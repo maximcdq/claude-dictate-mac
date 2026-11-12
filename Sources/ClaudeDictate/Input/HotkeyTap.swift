@@ -88,7 +88,7 @@ final class HotkeyTap {
     private func mouse(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
         let button = event.getIntegerValueField(.mouseEventButtonNumber)
         if Self.buttonUps.contains(type), droppedButtons.remove(button) != nil { return nil }
-        guard dictation.blocksKeys else { return Unmanaged.passUnretained(event) }
+        guard dictation.blocksKeys, dictation.held else { return Unmanaged.passUnretained(event) }
         Pointer.hold(true)
         if Self.pointerMoves.contains(type) {
             Pointer.pin()

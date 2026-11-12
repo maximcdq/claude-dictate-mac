@@ -153,6 +153,7 @@ final class Dictation {
 
     func hotkeyUp() {
         held = false
+        Pointer.hold(false)
         switch phase {
         case .arming:  // a tap: nothing happened, nothing to undo
             cancelPending()
@@ -243,7 +244,7 @@ final class Dictation {
     }
 
     private func tick() {
-        Pointer.hold(blocksKeys)
+        Pointer.hold(blocksKeys && held)  // the pointer comes back as soon as the hotkey is let go
         if style == .caret, phase == .holding || phase == .finishing { caret.follow() }  // it moves as text is typed
         switch phase {
         case .idle, .arming: return
