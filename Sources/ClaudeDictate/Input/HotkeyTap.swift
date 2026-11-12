@@ -8,6 +8,11 @@ final class HotkeyTap {
     private let settings: SettingsStore
     private var tap: CFMachPort?
     private var isDown = false
+    private var droppedButtons: Set<Int64> = []  // pressed while dictating: their release is dropped too
+
+    private static let pointerMoves: [CGEventType] = [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged]
+    private static let buttonDowns: [CGEventType] = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+    private static let buttonUps: [CGEventType] = [.leftMouseUp, .rightMouseUp, .otherMouseUp]
 
     init(dictation: Dictation, settings: SettingsStore) {
         self.dictation = dictation
@@ -19,7 +24,8 @@ final class HotkeyTap {
     private var hotkey: Hotkey { settings[.hotkey] }
 
     func install() {
-        let mask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
+        let mouse = (Self.pointerMoves + Self.buttonDowns + Self.buttonUps).reduce(0) { $0 | (1 << $1.rawValue) }
+        let mask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue) | mouse
         // an active (.defaultTap) tap needs only Accessibility; a listen-only one would need Input Monitoring too
         guard let t = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
                                         eventsOfInterest: CGEventMask(mask), callback: { _, type, event, info in
@@ -43,6 +49,9 @@ final class HotkeyTap {
 
     private func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
         if event.getIntegerValueField(.eventSourceUserData) == syntheticMark { return Unmanaged.passUnretained(event) }
+        if Self.pointerMoves.contains(type) || Self.buttonDowns.contains(type) || Self.buttonUps.contains(type) {
+            return mouse(type, event)
+        }
         let key = event.getIntegerValueField(.keyboardEventKeycode)
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
@@ -70,6 +79,24 @@ final class HotkeyTap {
             if key == 53, type == .keyDown { dictation.escape() }  // kVK_Escape
             return nil
         default: break
+        }
+        return Unmanaged.passUnretained(event)
+    }
+
+    // while dictating the pointer neither moves nor clicks; a button held since before (the Force Click that started
+    // the dictation) is still let go, or the app would think it stuck
+    private func mouse(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
+        let button = event.getIntegerValueField(.mouseEventButtonNumber)
+        if Self.buttonUps.contains(type), droppedButtons.remove(button) != nil { return nil }
+        guard dictation.blocksKeys, dictation.held else { return Unmanaged.passUnretained(event) }
+        Pointer.hold(true)
+        if Self.pointerMoves.contains(type) {
+            Pointer.pin()
+            return nil
+        }
+        if Self.buttonDowns.contains(type) {
+            droppedButtons.insert(button)
+            return nil
         }
         return Unmanaged.passUnretained(event)
     }
